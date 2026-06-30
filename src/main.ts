@@ -1,5 +1,6 @@
 import {
 	App,
+	type ButtonComponent,
 	FileSystemAdapter,
 	Notice,
 	Platform,
@@ -362,21 +363,24 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		this.plugin.settings.launchers.forEach((launcher) => this.renderLauncherRow(list, launcher));
 
 		const addRow = new Setting(containerEl).setName("Add launcher");
-		addRow.addButton((button) =>
+		addRow.addButton((button: ButtonComponent) =>
 			button.setButtonText("+ terminal").onClick(async () => {
 				await this.plugin.addLauncher("terminal");
+				// eslint-disable-next-line @typescript-eslint/no-deprecated -- intentional: the declarative API needs minAppVersion 1.13.0, which is still Catalyst-insider-only, not public
 				this.display();
 			})
 		);
-		addRow.addButton((button) =>
+		addRow.addButton((button: ButtonComponent) =>
 			button.setButtonText("+ app").onClick(async () => {
 				await this.plugin.addLauncher("app");
+				// eslint-disable-next-line @typescript-eslint/no-deprecated -- intentional: the declarative API needs minAppVersion 1.13.0, which is still Catalyst-insider-only, not public
 				this.display();
 			})
 		);
-		addRow.addButton((button) =>
+		addRow.addButton((button: ButtonComponent) =>
 			button.setButtonText("+ website").onClick(async () => {
 				await this.plugin.addLauncher("url");
+				// eslint-disable-next-line @typescript-eslint/no-deprecated -- intentional: the declarative API needs minAppVersion 1.13.0, which is still Catalyst-insider-only, not public
 				this.display();
 			})
 		);
@@ -484,6 +488,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 				.onChange(async (value) => {
 					launcher.type = value as LauncherType;
 					await this.plugin.saveSettings();
+					// eslint-disable-next-line @typescript-eslint/no-deprecated -- intentional: the declarative API needs minAppVersion 1.13.0, which is still Catalyst-insider-only, not public
 					this.display();
 				})
 		);
@@ -505,13 +510,15 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 			text.inputEl.addClass("open-anything-target-input");
 		});
 
-		row.addButton((button) =>
+		row.addButton((button: ButtonComponent) =>
 			button
 				.setIcon("trash")
 				.setTooltip("Remove")
-				.setDestructive()
+				// eslint-disable-next-line @typescript-eslint/no-deprecated -- setDestructive() needs minAppVersion 1.13.0, still insider-only
+				.setWarning()
 				.onClick(async () => {
 					await this.plugin.removeLauncher(launcher.id);
+					// eslint-disable-next-line @typescript-eslint/no-deprecated -- intentional: the declarative API needs minAppVersion 1.13.0, which is still Catalyst-insider-only, not public
 					this.display();
 				})
 		);
