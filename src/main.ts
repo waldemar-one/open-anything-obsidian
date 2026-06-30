@@ -8,6 +8,17 @@ import {
 	Setting,
 } from "obsidian";
 
+/**
+ * Lazy, typed require() for Node built-ins. This is the single place in the
+ * file where the `any` from CommonJS require() is cast to a real type, so it
+ * doesn't leak across every call site. Never invoked until after a
+ * Platform.isDesktopApp check (see runLauncher()), so it's never touched on mobile.
+ */
+function nodeRequire<T>(id: string): T {
+	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	return require(id) as T;
+}
+
 type LauncherType = "terminal" | "app" | "url";
 type WorkingDirMode = "vault" | "active-file";
 type WinTerminal = "wt" | "cmd" | "powershell";
@@ -68,7 +79,7 @@ export default class OpenAnythingPlugin extends Plugin {
 
 	// ---------- Launcher CRUD ----------
 
-	addLauncher(type: LauncherType): Launcher {
+	async addLauncher(type: LauncherType): Promise<Launcher> {
 		const launcher: Launcher = {
 			id: `launcher-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
 			name: type === "url" ? "New website" : type === "app" ? "New app" : "New terminal command",
@@ -76,16 +87,16 @@ export default class OpenAnythingPlugin extends Plugin {
 			target: "",
 		};
 		this.settings.launchers.push(launcher);
-		this.saveSettings();
+		await this.saveSettings();
 		this.registerLauncherCommand(launcher);
 		return launcher;
 	}
 
-	removeLauncher(id: string): void {
+	async removeLauncher(id: string): Promise<void> {
 		const index = this.settings.launchers.findIndex((l) => l.id === id);
 		if (index === -1) return;
 		this.settings.launchers.splice(index, 1);
-		this.saveSettings();
+		await this.saveSettings();
 		this.removeCommand(`${this.manifest.id}:run-${id}`);
 	}
 
@@ -150,7 +161,7 @@ export default class OpenAnythingPlugin extends Plugin {
 			const activeFile = this.app.workspace.getActiveFile();
 			if (activeFile) {
 				// Lazy require: only ever touched on desktop, after the Platform check above.
-				const path = require("path") as typeof import("path");
+				const path = nodeRequire<typeof import("path")>("path");
 				const fileDir = path.dirname(activeFile.path);
 				return fileDir === "." ? vaultPath : path.join(vaultPath, fileDir);
 			}
@@ -180,7 +191,7 @@ export default class OpenAnythingPlugin extends Plugin {
 	// ---------- Type: app (desktop only, launches the GUI app directly) ----------
 
 	private launchApp(cwd: string, target: string): void {
-		const { spawn } = require("child_process") as typeof import("child_process");
+		const { spawn } = nodeRequire<typeof import("child_process")>("child_process");
 
 		if (Platform.isMacOS) {
 			const child = spawn("open", ["-a", target], { detached: true, stdio: "ignore" });
@@ -211,10 +222,10 @@ export default class OpenAnythingPlugin extends Plugin {
 	// macOS: a temporary .command script opened via `open -a`. This avoids the
 	// Automation permission prompt that an AppleScript/osascript approach would need.
 	private launchMac(cwd: string, command: string): void {
-		const { spawn } = require("child_process") as typeof import("child_process");
-		const path = require("path") as typeof import("path");
-		const os = require("os") as typeof import("os");
-		const fs = require("fs") as typeof import("fs");
+		const { spawn } = nodeRequire<typeof import("child_process")>("child_process");
+		const path = nodeRequire<typeof import("path")>("path");
+		const os = nodeRequire<typeof import("os")>("os");
+		const fs = nodeRequire<typeof import("fs")>("fs");
 
 		const scriptPath = path.join(os.tmpdir(), `open-anything-${Date.now()}.command`);
 		const escapedCwd = cwd.replace(/"/g, '\\"');
@@ -229,13 +240,13 @@ export default class OpenAnythingPlugin extends Plugin {
 		child.unref();
 
 		// Best-effort cleanup once the terminal has had time to read the script.
-		setTimeout(() => {
+		window.setTimeout(() => {
 			fs.unlink(scriptPath, () => { /* may already be gone, that's fine */ });
 		}, 15000);
 	}
 
 	private launchWindows(cwd: string, command: string): void {
-		const { spawn } = require("child_process") as typeof import("child_process");
+		const { spawn } = nodeRequire<typeof import("child_process")>("child_process");
 		const mode = this.settings.winTerminalApp;
 
 		const spawnCmd = () => {
@@ -284,7 +295,7 @@ export default class OpenAnythingPlugin extends Plugin {
 	}
 
 	private launchLinux(cwd: string, command: string): void {
-		const { spawn } = require("child_process") as typeof import("child_process");
+		const { spawn } = nodeRequire<typeof import("child_process")>("child_process");
 		const choice = this.settings.linuxTerminal;
 		const shellCmd = `${command}; exec bash`;
 
@@ -309,7 +320,7 @@ export default class OpenAnythingPlugin extends Plugin {
 	}
 
 	private launchCustom(cwd: string, command: string, template: string): void {
-		const { spawn } = require("child_process") as typeof import("child_process");
+		const { spawn } = nodeRequire<typeof import("child_process")>("child_process");
 		const filled = template.replace(/\{cwd\}/g, cwd).replace(/\{cmd\}/g, command);
 
 		const shellBin = Platform.isWin ? "cmd.exe" : "/bin/sh";
@@ -353,20 +364,20 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		const addRow = new Setting(containerEl).setName("Add launcher");
 		addRow.addButton((button) =>
-			button.setButtonText("+ Terminal").onClick(() => {
-				this.plugin.addLauncher("terminal");
+			button.setButtonText("+ Terminal").onClick(async () => {
+				await this.plugin.addLauncher("terminal");
 				this.display();
 			})
 		);
 		addRow.addButton((button) =>
-			button.setButtonText("+ App").onClick(() => {
-				this.plugin.addLauncher("app");
+			button.setButtonText("+ App").onClick(async () => {
+				await this.plugin.addLauncher("app");
 				this.display();
 			})
 		);
 		addRow.addButton((button) =>
-			button.setButtonText("+ Website").onClick(() => {
-				this.plugin.addLauncher("url");
+			button.setButtonText("+ Website").onClick(async () => {
+				await this.plugin.addLauncher("url");
 				this.display();
 			})
 		);
@@ -464,7 +475,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					this.plugin.registerLauncherCommand(launcher);
 				});
-			text.inputEl.style.width = "10em";
+			text.inputEl.addClass("open-anything-name-input");
 		});
 
 		row.addDropdown((dropdown) =>
@@ -492,16 +503,16 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					launcher.target = value;
 					await this.plugin.saveSettings();
 				});
-			text.inputEl.style.width = "16em";
+			text.inputEl.addClass("open-anything-target-input");
 		});
 
 		row.addButton((button) =>
 			button
 				.setIcon("trash")
 				.setTooltip("Remove")
-				.setWarning()
-				.onClick(() => {
-					this.plugin.removeLauncher(launcher.id);
+				.setDestructive()
+				.onClick(async () => {
+					await this.plugin.removeLauncher(launcher.id);
 					this.display();
 				})
 		);

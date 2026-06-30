@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  id-token: write
+  attestations: write
 
 jobs:
   build:
@@ -23,6 +25,13 @@ jobs:
           npm install
           npm run build
 
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v1
+        with:
+          subject-path: |
+            main.js
+            manifest.json
+
       - name: Create release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -31,4 +40,4 @@ jobs:
           gh release create "$tag" \
             --title "$tag" \
             --draft \
-            main.js manifest.json versions.json
+            main.js manifest.json

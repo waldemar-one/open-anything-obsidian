@@ -1,6 +1,6 @@
 {
 	"name": "open-anything",
-	"version": "1.0.0",
+	"version": "1.0.1",
 	"description": "Launch any terminal command, application, or website from Obsidian, with per-launcher hotkeys.",
 	"main": "main.js",
 	"type": "module",
