@@ -1,0 +1,9 @@
+{
+	"id": "open-anything",
+	"name": "Open Anything",
+	"version": "1.0.0",
+	"minAppVersion": "0.15.0",
+	"description": "Launch terminal commands, applications, or websites from Obsidian. Each launcher gets its own command and hotkey.",
+	"author": "Vladimir",
+	"isDesktopOnly": false
+}
