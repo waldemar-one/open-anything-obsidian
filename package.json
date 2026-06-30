@@ -1,14 +1,14 @@
 {
 	"name": "open-anything",
-	"version": "1.0.4",
+	"version": "1.1.2",
 	"description": "Launch any terminal command, application, or website from Obsidian, with per-launcher hotkeys.",
 	"main": "main.js",
 	"type": "module",
 	"scripts": {
-		"dev": "node esbuild.config.mjs",
-		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"dev": "node scripts/esbuild.config.mjs",
+		"build": "tsc -noEmit -skipLibCheck && node scripts/esbuild.config.mjs production",
 		"lint": "eslint src",
-		"version": "node version-bump.mjs && git add manifest.json versions.json"
+		"version": "node scripts/version-bump.mjs && git add manifest.json versions.json"
 	},
 	"keywords": [],
 	"author": "Vladimir",

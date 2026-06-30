@@ -51,7 +51,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          assets=(main.js manifest.json)
+          if [ -f styles.css ]; then assets+=(styles.css); fi
           gh release create "$TAG" \
             --title "$TAG" \
             --draft \
-            main.js manifest.json
+            "${assets[@]}"
