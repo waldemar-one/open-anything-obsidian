@@ -14,26 +14,35 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # Checks out main directly, not the tag's commit. The tag only supplies
+      # the version string below. This assumes the tag is always cut from
+      # main's current tip (the normal flow: push code to main, then tag it),
+      # and it sidesteps detached-HEAD push conflicts entirely.
       - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
           node-version: "20.x"
 
-      - name: Sync manifest and versions.json to the pushed tag
+      - name: Resolve tag name
         run: |
           tag="${GITHUB_REF#refs/tags/}"
           tag="${tag#v}"
-          node scripts/ci-set-version.mjs "$tag"
           echo "TAG=$tag" >> "$GITHUB_ENV"
 
-      - name: Commit the version sync back to the repo
+      - name: Sync manifest and versions.json to the tag
+        run: node scripts/ci-set-version.mjs "$TAG"
+
+      - name: Commit the version sync back to main
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add manifest.json versions.json
           git diff --cached --quiet || git commit -m "Sync manifest to $TAG [skip ci]"
-          git push origin HEAD:main
+          git push origin main
 
       - name: Build
         run: |
