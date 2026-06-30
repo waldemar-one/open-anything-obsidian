@@ -19,7 +19,7 @@ Open Settings → Open Anything. There are three launcher types:
 - **App**: launches a GUI application directly, no terminal window. Desktop only.
 - **Website**: opens a URL in your default browser. Works on desktop and mobile.
 
-Add as many as you want with the "+ Terminal" / "+ App" / "+ Website" buttons. Each one gets a command named "Open: <name>", searchable in the command palette (Ctrl/Cmd+P) and bindable to a hotkey under Settings → Hotkeys. No default hotkeys are set. With an arbitrary number of launchers there's no sane default to guess, so pick whatever fits you.
+Add as many as you want with the "+ Terminal" / "+ App" / "+ Website" buttons. Each one gets a command named `Open: <name>`, searchable in the command palette (Ctrl/Cmd+P) and bindable to a hotkey under Settings → Hotkeys. No default hotkeys are set. With an arbitrary number of launchers there's no sane default to guess, so pick whatever fits you.
 
 There's no ribbon icon by design. Everything goes through commands.
 
