@@ -1,6 +1,6 @@
 {
 	"name": "open-anything",
-	"version": "1.0.2",
+	"version": "1.0.4",
 	"description": "Launch any terminal command, application, or website from Obsidian, with per-launcher hotkeys.",
 	"main": "main.js",
 	"type": "module",
@@ -16,7 +16,6 @@
 	"devDependencies": {
 		"@eslint/js": "^10.0.1",
 		"@types/node": "^20.14.0",
-		"builtin-modules": "^3.3.0",
 		"esbuild": "^0.25.5",
 		"eslint": "^10.0.1",
 		"eslint-plugin-obsidianmd": "^0.3.0",
