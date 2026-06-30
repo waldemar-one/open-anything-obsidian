@@ -1,8 +1,8 @@
 {
 	"id": "open-anything",
 	"name": "Open Anything",
-	"version": "1.0.1",
-	"minAppVersion": "1.11.0",
+	"version": "1.0.2",
+	"minAppVersion": "1.13.0",
 	"description": "Launch terminal commands, applications, or websites. Each launcher gets its own command and hotkey.",
 	"author": "Vladimir",
 	"isDesktopOnly": false

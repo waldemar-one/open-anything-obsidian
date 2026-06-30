@@ -15,7 +15,7 @@ import {
  * Platform.isDesktopApp check (see runLauncher()), so it's never touched on mobile.
  */
 function nodeRequire<T>(id: string): T {
-	// eslint-disable-next-line @typescript-eslint/no-var-requires
+	// eslint-disable-next-line @typescript-eslint/no-require-imports -- intentional, single, isolated CommonJS require for lazy-loading Node built-ins on desktop only
 	return require(id) as T;
 }
 
@@ -114,11 +114,11 @@ export default class OpenAnythingPlugin extends Plugin {
 	runLauncher(id: string): void {
 		const launcher = this.settings.launchers.find((l) => l.id === id);
 		if (!launcher) {
-			new Notice("Open Anything: this launcher no longer exists.");
+			new Notice("This launcher no longer exists.");
 			return;
 		}
 		if (!launcher.target.trim()) {
-			new Notice(`Open Anything: "${launcher.name}" has no target set yet. Fill it in under Settings.`);
+			new Notice(`"${launcher.name}" has no target set yet. Fill it in under settings.`);
 			return;
 		}
 
@@ -136,7 +136,7 @@ export default class OpenAnythingPlugin extends Plugin {
 
 			const cwd = this.getWorkingDirectory();
 			if (!cwd) {
-				new Notice("Open Anything: couldn't resolve the vault path.");
+				new Notice("Couldn't resolve the vault path.");
 				return;
 			}
 
@@ -148,7 +148,7 @@ export default class OpenAnythingPlugin extends Plugin {
 			new Notice(`Opening: ${launcher.name}`);
 		} catch (err) {
 			console.error("Open Anything:", err);
-			new Notice("Open Anything: something went wrong, check the developer console (Ctrl+Shift+I).");
+			new Notice("Something went wrong, check the developer console (Ctrl+Shift+I).");
 		}
 	}
 
@@ -172,9 +172,9 @@ export default class OpenAnythingPlugin extends Plugin {
 	private notifySpawnError(err: NodeJS.ErrnoException): void {
 		console.error("Open Anything: spawn error", err);
 		if (err.code === "ENOENT") {
-			new Notice(`Open Anything: couldn't find "${err.path ?? "the program"}". Check that it's installed and on PATH, or fix it in the plugin settings.`);
+			new Notice(`Couldn't find "${err.path ?? "the program"}". Check that it's installed and on PATH, or fix it in the plugin settings.`);
 		} else {
-			new Notice("Open Anything: couldn't launch that. Check the developer console (Ctrl+Shift+I) for details.");
+			new Notice("Couldn't launch that. Check the developer console (Ctrl+Shift+I) for details.");
 		}
 	}
 
@@ -195,13 +195,13 @@ export default class OpenAnythingPlugin extends Plugin {
 
 		if (Platform.isMacOS) {
 			const child = spawn("open", ["-a", target], { detached: true, stdio: "ignore" });
-			child.on("error", (err) => this.notifySpawnError(err as NodeJS.ErrnoException));
+			child.on("error", (err) => this.notifySpawnError(err));
 			child.unref();
 			return;
 		}
 
 		const child = spawn(target, [], { cwd, detached: true, stdio: "ignore", windowsHide: false });
-		child.on("error", (err) => this.notifySpawnError(err as NodeJS.ErrnoException));
+		child.on("error", (err) => this.notifySpawnError(err));
 		child.unref();
 	}
 
@@ -236,7 +236,7 @@ export default class OpenAnythingPlugin extends Plugin {
 		const args = appName ? ["-a", appName, scriptPath] : [scriptPath];
 
 		const child = spawn("open", args, { detached: true, stdio: "ignore" });
-		child.on("error", (err) => this.notifySpawnError(err as NodeJS.ErrnoException));
+		child.on("error", (err) => this.notifySpawnError(err));
 		child.unref();
 
 		// Best-effort cleanup once the terminal has had time to read the script.
@@ -256,7 +256,7 @@ export default class OpenAnythingPlugin extends Plugin {
 				stdio: "ignore",
 				windowsHide: false,
 			});
-			child.on("error", (err) => this.notifySpawnError(err as NodeJS.ErrnoException));
+			child.on("error", (err) => this.notifySpawnError(err));
 			child.unref();
 		};
 
@@ -266,13 +266,12 @@ export default class OpenAnythingPlugin extends Plugin {
 				stdio: "ignore",
 				windowsHide: false,
 			});
-			child.on("error", (err) => {
-				const error = err as NodeJS.ErrnoException;
-				if (error.code === "ENOENT") {
+			child.on("error", (err: NodeJS.ErrnoException) => {
+				if (err.code === "ENOENT") {
 					new Notice("Windows Terminal not found, opening cmd.exe instead.");
 					spawnCmd();
 				} else {
-					this.notifySpawnError(error);
+					this.notifySpawnError(err);
 				}
 			});
 			child.unref();
@@ -286,7 +285,7 @@ export default class OpenAnythingPlugin extends Plugin {
 				stdio: "ignore",
 				windowsHide: false,
 			});
-			child.on("error", (err) => this.notifySpawnError(err as NodeJS.ErrnoException));
+			child.on("error", (err) => this.notifySpawnError(err));
 			child.unref();
 			return;
 		}
@@ -315,7 +314,7 @@ export default class OpenAnythingPlugin extends Plugin {
 		}
 
 		const child = spawn(bin, args, { cwd, detached: true, stdio: "ignore" });
-		child.on("error", (err) => this.notifySpawnError(err as NodeJS.ErrnoException));
+		child.on("error", (err) => this.notifySpawnError(err));
 		child.unref();
 	}
 
@@ -327,14 +326,14 @@ export default class OpenAnythingPlugin extends Plugin {
 		const shellArgs = Platform.isWin ? ["/c", filled] : ["-c", filled];
 
 		const child = spawn(shellBin, shellArgs, { detached: true, stdio: "ignore", windowsHide: false });
-		child.on("error", (err) => this.notifySpawnError(err as NodeJS.ErrnoException));
+		child.on("error", (err) => this.notifySpawnError(err));
 		child.unref();
 	}
 
 	// ---------- Settings persistence ----------
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData()) as OpenAnythingSettings;
 	}
 
 	async saveSettings(): Promise<void> {
@@ -356,7 +355,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Launchers")
-			.setDesc("Each row below gets its own command, so you can bind it to a hotkey in the Hotkeys settings.")
+			.setDesc("Each row below gets its own command, so you can bind it to a hotkey in the hotkeys settings.")
 			.setHeading();
 
 		const list = containerEl.createDiv();
@@ -364,19 +363,19 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		const addRow = new Setting(containerEl).setName("Add launcher");
 		addRow.addButton((button) =>
-			button.setButtonText("+ Terminal").onClick(async () => {
+			button.setButtonText("+ terminal").onClick(async () => {
 				await this.plugin.addLauncher("terminal");
 				this.display();
 			})
 		);
 		addRow.addButton((button) =>
-			button.setButtonText("+ App").onClick(async () => {
+			button.setButtonText("+ app").onClick(async () => {
 				await this.plugin.addLauncher("app");
 				this.display();
 			})
 		);
 		addRow.addButton((button) =>
-			button.setButtonText("+ Website").onClick(async () => {
+			button.setButtonText("+ website").onClick(async () => {
 				await this.plugin.addLauncher("url");
 				this.display();
 			})
@@ -384,7 +383,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Terminal and app")
-			.setDesc('Applies to every "Terminal" and "App" launcher above. Websites don\'t need any of this.')
+			.setDesc('Applies to every "terminal" and "app" launcher above. Websites don\'t need any of this.')
 			.setHeading();
 
 		new Setting(containerEl)
@@ -480,7 +479,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		row.addDropdown((dropdown) =>
 			dropdown
-				.addOptions({ terminal: "Terminal", app: "App", url: "Website" })
+				.addOptions({ terminal: "terminal", app: "app", url: "website" })
 				.setValue(launcher.type)
 				.onChange(async (value) => {
 					launcher.type = value as LauncherType;

@@ -2,6 +2,8 @@
 
 An Obsidian plugin that launches terminal commands, applications, or websites. Every launcher you add gets its own command, so you can bind it to its own hotkey.
 
+This replaces the earlier "Open Claude Code" plugin. Claude Code is now just the default launcher that ships pre-configured: one entry among as many as you want.
+
 ## Install
 
 1. Copy `main.js` and `manifest.json` into `<your vault>/.obsidian/plugins/open-anything/` (or unzip the source package there).
