@@ -7,9 +7,8 @@ This replaces the earlier "Open Claude Code" plugin. Claude Code is now just the
 ## Install
 
 1. Copy `main.js` and `manifest.json` into `<your vault>/.obsidian/plugins/open-anything/` (or unzip the source package there).
-2. If you still have the old `open-claude-code` folder, delete it. This one replaces it.
-3. In Obsidian: Settings → Community plugins, make sure Restricted mode is off.
-4. Enable "Open Anything" in the Installed plugins list.
+2. In Obsidian: Settings → Community plugins, make sure Restricted mode is off.
+3. Enable "Open Anything" in the Installed plugins list.
 
 ## Usage
 
