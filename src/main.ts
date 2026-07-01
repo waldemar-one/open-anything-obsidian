@@ -2,11 +2,14 @@ import {
 	App,
 	type ButtonComponent,
 	FileSystemAdapter,
+	FuzzySuggestModal,
+	getIconIds,
 	Notice,
 	Platform,
 	Plugin,
 	PluginSettingTab,
 	Setting,
+	setIcon,
 } from "obsidian";
 
 /**
@@ -668,14 +671,62 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 			text.inputEl.classList.add("open-anything-target-input");
 		});
 
+		row.addButton((button: ButtonComponent) => {
+			button
+				.setIcon(launcher.icon || "image")
+				.setTooltip(launcher.icon ? `Sidebar icon: ${launcher.icon} (click to change)` : "No sidebar icon (click to add one)")
+				.onClick(() => {
+					new IconPickerModal(this.plugin.app, async (iconId) => {
+						launcher.icon = iconId ?? "";
+						await this.plugin.saveSettings();
+						this.plugin.registerLauncherRibbonIcon(launcher);
+						this.build();
+					}).open();
+				});
+		});
+
 		row.addButton((button: ButtonComponent) =>
 			button
 				.setIcon("trash")
 				.setTooltip("Remove")
-					.onClick(async () => {
+				.onClick(async () => {
 					await this.plugin.removeLauncher(launcher.id);
-						this.build();
+					this.build();
 				})
 		);
+	}
+}
+
+/**
+ * Fuzzy-searchable picker over every icon id Obsidian ships (getIconIds()).
+ * A "No icon" entry sits first so clearing a launcher's ribbon icon doesn't
+ * require a separate button.
+ */
+class IconPickerModal extends FuzzySuggestModal<string | null> {
+	private readonly onPick: (iconId: string | null) => void | Promise<void>;
+
+	constructor(app: App, onPick: (iconId: string | null) => void | Promise<void>) {
+		super(app);
+		this.onPick = onPick;
+		this.setPlaceholder('Search icons, or pick "no icon" to clear...');
+	}
+
+	getItems(): (string | null)[] {
+		return [null, ...getIconIds()];
+	}
+
+	getItemText(item: string | null): string {
+		return item ?? "No icon";
+	}
+
+	renderSuggestion(match: { item: string | null }, el: HTMLElement): void {
+		el.classList.add("open-anything-icon-suggestion");
+		const iconEl = el.createSpan({ cls: "open-anything-icon-suggestion-icon" });
+		if (match.item) setIcon(iconEl, match.item);
+		el.createSpan({ text: this.getItemText(match.item) });
+	}
+
+	onChooseItem(item: string | null): void {
+		void this.onPick(item);
 	}
 }

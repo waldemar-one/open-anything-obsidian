@@ -5,3 +5,17 @@
 .open-anything-target-input {
 	width: 16em;
 }
+
+.open-anything-icon-suggestion {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+}
+
+.open-anything-icon-suggestion-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.2em;
+	height: 1.2em;
+}
