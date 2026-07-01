@@ -40,6 +40,10 @@
 
 .open-anything-row {
 	position: relative;
+	/* Animates the translateY() shifts applied to non-dragged rows while something else is
+	   being dragged. The dragged row itself overrides this to 'none' via .open-anything-dragging,
+	   since it needs to track the cursor with zero lag, not ease into position. */
+	transition: transform 150ms ease;
 }
 
 .open-anything-drag-handle {
@@ -50,6 +54,7 @@
 	cursor: grab;
 	color: var(--text-faint);
 	flex-shrink: 0;
+	touch-action: none;
 }
 
 .open-anything-drag-handle:hover,
@@ -61,6 +66,21 @@
 	cursor: grabbing;
 }
 
-.open-anything-drag-over {
-	box-shadow: 0 -2px 0 0 var(--interactive-accent);
+.open-anything-dragging {
+	position: fixed;
+	z-index: var(--layer-popover, 70);
+	transition: none;
+	pointer-events: none;
+	box-shadow: var(--shadow-l);
+	background-color: var(--background-primary);
+	border-radius: var(--radius-m);
+	opacity: 0.95;
+}
+
+/* Applied to <body> for the duration of a drag: keeps the grab cursor and stops text
+   selection everywhere, not just over the handle, since the pointer moves across the
+   whole settings pane while dragging. */
+.open-anything-is-dragging {
+	cursor: grabbing !important;
+	user-select: none;
 }

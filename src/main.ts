@@ -61,6 +61,10 @@ interface Launcher {
 	 * "url" and "sequence" (a sequence's steps each resolve their own directory).
 	 */
 	customWorkingDir?: string;
+	/** Space-separated extra arguments passed to the target executable. Only used when type === "app". */
+	appArgs?: string;
+	/** If true, this launcher runs once automatically after Obsidian finishes loading the workspace. */
+	runOnStartup?: boolean;
 }
 
 interface OpenAnythingSettings {
@@ -78,6 +82,11 @@ interface OpenAnythingSettings {
 	customLaunchTemplate: string;
 	/** Command used to run "py" script launchers. Defaults to python3, but some setups only have python or py on PATH. */
 	pythonCommand: string;
+	/**
+	 * Whether to show a Notice on successful launch ("Opening: X", "Ran: X"). Errors and
+	 * warnings always show regardless of this, since silencing those would hide real problems.
+	 */
+	showNotices: boolean;
 }
 
 const DEFAULT_SETTINGS: OpenAnythingSettings = {
@@ -96,6 +105,7 @@ const DEFAULT_SETTINGS: OpenAnythingSettings = {
 	linuxTerminal: "gnome-terminal",
 	customLaunchTemplate: "",
 	pythonCommand: "python3",
+	showNotices: true,
 };
 
 export default class OpenAnythingPlugin extends Plugin {
@@ -112,6 +122,14 @@ export default class OpenAnythingPlugin extends Plugin {
 		}
 
 		this.addSettingTab(new OpenAnythingSettingTab(this.app, this));
+
+		// Deferred until the workspace is fully ready, not fired mid-onload, so
+		// startup launchers don't race the vault index or open before Obsidian's own UI has settled.
+		this.app.workspace.onLayoutReady(() => {
+			for (const launcher of this.settings.launchers) {
+				if (launcher.runOnStartup) void this.runLauncher(launcher.id);
+			}
+		});
 	}
 
 	// ---------- Launcher CRUD ----------
@@ -213,10 +231,10 @@ export default class OpenAnythingPlugin extends Plugin {
 
 			if (launcher.type === "terminal") {
 				this.launchTerminal(cwd, launcher.target);
-				new Notice(`Opening: ${launcher.name}`);
+				this.notifyStatus(`Opening: ${launcher.name}`);
 			} else if (launcher.type === "app") {
-				this.launchApp(cwd, launcher.target);
-				new Notice(`Opening: ${launcher.name}`);
+				this.launchApp(cwd, launcher);
+				this.notifyStatus(`Opening: ${launcher.name}`);
 			} else {
 				// launchScript reports its own success/failure, since (unlike terminal/app,
 				// which are fire-and-forget spawns) it's actually awaited to completion.
@@ -240,7 +258,7 @@ export default class OpenAnythingPlugin extends Plugin {
 		}
 
 		visitedSequences.add(launcher.id);
-		new Notice(`Running sequence: ${launcher.name}`);
+		this.notifyStatus(`Running sequence: ${launcher.name}`);
 
 		for (const stepId of steps) {
 			const step = this.settings.launchers.find((l) => l.id === stepId);
@@ -299,6 +317,11 @@ export default class OpenAnythingPlugin extends Plugin {
 		}
 	}
 
+	/** Success/status notices only, gated by the "Show notices" setting. Errors and warnings never go through this, they always show. */
+	private notifyStatus(message: string): void {
+		if (this.settings.showNotices) new Notice(message);
+	}
+
 	// ---------- Type: url (works on desktop AND mobile) ----------
 
 	private launchUrl(target: string): void {
@@ -311,17 +334,31 @@ export default class OpenAnythingPlugin extends Plugin {
 
 	// ---------- Type: app (desktop only, launches the GUI app directly) ----------
 
-	private launchApp(cwd: string, target: string): void {
+	private launchApp(cwd: string, launcher: Launcher): void {
 		const { spawn } = nodeRequire<typeof import("child_process")>("child_process");
+		const target = launcher.target;
+		const args = (launcher.appArgs ?? "").trim().length > 0 ? launcher.appArgs!.trim().split(/\s+/) : [];
 
 		if (Platform.isMacOS) {
-			const child = spawn("open", ["-a", target], { detached: true, stdio: "ignore" });
+			const child = spawn("open", ["-a", target, ...(args.length > 0 ? ["--args", ...args] : [])], {
+				detached: true,
+				stdio: "ignore",
+			});
 			child.on("error", (err) => this.notifySpawnError(err));
 			child.unref();
 			return;
 		}
 
-		const child = spawn(target, [], { cwd, detached: true, stdio: "ignore", windowsHide: false });
+		// .bat and .cmd files can't be spawned directly on Windows without shell:true,
+		// Node throws otherwise since they aren't real executables, cmd.exe has to run them.
+		const isWindowsScript = Platform.isWin && /\.(bat|cmd)$/i.test(target);
+		const child = spawn(target, args, {
+			cwd,
+			detached: true,
+			stdio: "ignore",
+			windowsHide: false,
+			shell: isWindowsScript,
+		});
 		child.on("error", (err) => this.notifySpawnError(err));
 		child.unref();
 	}
@@ -347,7 +384,7 @@ export default class OpenAnythingPlugin extends Plugin {
 			});
 			child.on("error", (err) => this.notifySpawnError(err));
 			child.unref();
-			new Notice(`Opening: ${launcher.name}`);
+			this.notifyStatus(`Opening: ${launcher.name}`);
 			return;
 		}
 
@@ -370,7 +407,7 @@ export default class OpenAnythingPlugin extends Plugin {
 				return;
 			}
 			await (exported as (ctx: { app: App; args: string[] }) => unknown)({ app: this.app, args });
-			new Notice(`Ran: ${launcher.name}`);
+			this.notifyStatus(`Ran: ${launcher.name}`);
 		} catch (err) {
 			console.error(`Open Anything: script "${launcher.name}" threw`, err);
 			const message = err instanceof Error ? err.message : String(err);
@@ -514,10 +551,22 @@ export default class OpenAnythingPlugin extends Plugin {
 	}
 }
 
+interface LauncherDragState {
+	launcherId: string;
+	rowEl: HTMLElement;
+	startIndex: number;
+	currentIndex: number;
+	pointerOffsetY: number;
+	rowHeight: number;
+	others: { el: HTMLElement; originalIndex: number; centerY: number }[];
+}
+
 class OpenAnythingSettingTab extends PluginSettingTab {
 	plugin: OpenAnythingPlugin;
-	/** id of the launcher currently being dragged, set on dragstart and read on drop. Plain field rather than dataTransfer since this never leaves the same window. */
-	private draggedLauncherId: string | null = null;
+	/** Live state of an in-progress pointer-driven drag, null when nothing is being dragged. */
+	private dragState: LauncherDragState | null = null;
+	/** UI-only, not persisted: which launchers currently have their advanced section expanded. Resets when the settings tab is reopened. */
+	private expandedLauncherIds = new Set<string>();
 
 	constructor(app: App, plugin: OpenAnythingPlugin) {
 		super(app, plugin);
@@ -531,6 +580,17 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 	private build(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+
+		new Setting(containerEl).setName("Notifications").setHeading();
+		new Setting(containerEl)
+			.setName("Show notices")
+			.setDesc('Show a confirmation notice on successful launch ("opening: X"). Errors and warnings always show regardless.')
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showNotices).onChange(async (value) => {
+					this.plugin.settings.showNotices = value;
+					await this.plugin.saveSettings();
+				})
+			);
 
 		new Setting(containerEl)
 			.setName("Launchers")
@@ -728,6 +788,18 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		}
 
 		row.addButton((button: ButtonComponent) => {
+			const expanded = this.expandedLauncherIds.has(launcher.id);
+			button
+				.setIcon(expanded ? "chevron-down" : "chevron-right")
+				.setTooltip(expanded ? "Hide advanced options" : "Show advanced options")
+				.onClick(() => {
+					if (expanded) this.expandedLauncherIds.delete(launcher.id);
+					else this.expandedLauncherIds.add(launcher.id);
+					this.build();
+				});
+		});
+
+		row.addButton((button: ButtonComponent) => {
 			button
 				.setIcon(launcher.icon || "image")
 				.setTooltip(launcher.icon ? `Sidebar icon: ${launcher.icon} (click to change)` : "No sidebar icon (click to add one)")
@@ -751,17 +823,87 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 				})
 		);
 
-		if (launcher.type === "terminal" || launcher.type === "app") this.renderWorkingDirField(containerEl, launcher);
-		if (launcher.type === "script") this.renderScriptDetails(containerEl, launcher);
-		if (launcher.type === "sequence") this.renderSequenceDetails(containerEl, launcher);
+		if (this.expandedLauncherIds.has(launcher.id)) this.renderAdvancedSection(containerEl, launcher);
 	}
 
-	/** Optional per-launcher folder override, shown for "terminal", "app", and (inside its own details block) "script". */
-	private renderWorkingDirField(containerEl: HTMLElement, launcher: Launcher): void {
+	/**
+	 * Single collapsible "advanced" section per launcher, toggled by the chevron button in the
+	 * summary row. Always starts with the startup toggle (every type gets one), then the
+	 * type-specific fields that used to live in four separate always-visible blocks.
+	 */
+	private renderAdvancedSection(containerEl: HTMLElement, launcher: Launcher): void {
 		const details = containerEl.createDiv({ cls: "open-anything-launcher-details" });
+
 		new Setting(details)
+			.setName("Run at startup")
+			.setDesc("Run this launcher once automatically after Obsidian finishes loading.")
+			.addToggle((toggle) =>
+				toggle.setValue(launcher.runOnStartup ?? false).onChange(async (value) => {
+					launcher.runOnStartup = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		if (launcher.type === "terminal") {
+			this.renderWorkingDirField(details, launcher, "Optional, relative to the vault root. Overrides the global working directory setting for this launcher only.");
+		}
+
+		if (launcher.type === "app") {
+			new Setting(details)
+				.setName("Arguments")
+				.setDesc("Optional, space-separated. Passed to the target as-is; quoting isn't supported yet. On Windows, .bat and .cmd targets are supported too.")
+				.addText((text) =>
+					text
+						.setPlaceholder("--flag value")
+						.setValue(launcher.appArgs ?? "")
+						.onChange(async (value) => {
+							launcher.appArgs = value;
+							await this.plugin.saveSettings();
+						})
+				);
+			this.renderWorkingDirField(details, launcher, "Optional, relative to the vault root. Overrides the global working directory setting for this launcher only.");
+		}
+
+		if (launcher.type === "script") {
+			new Setting(details)
+				.setName("Runtime")
+				.setDesc('"js" runs in Obsidian\'s own process; "py" is spawned as a separate Python process and can\'t access the vault directly.')
+				.addDropdown((dropdown) =>
+					dropdown
+						.addOptions({ js: "JavaScript (.js)", py: "Python (.py)" })
+						.setValue(launcher.scriptRuntime ?? "js")
+						.onChange(async (value) => {
+							launcher.scriptRuntime = value as ScriptRuntime;
+							await this.plugin.saveSettings();
+						})
+				);
+			new Setting(details)
+				.setName("Arguments")
+				.setDesc("Optional, space-separated. Passed to the script as-is; quoting isn't supported yet.")
+				.addText((text) =>
+					text
+						.setPlaceholder("--flag value")
+						.setValue(launcher.scriptArgs ?? "")
+						.onChange(async (value) => {
+							launcher.scriptArgs = value;
+							await this.plugin.saveSettings();
+						})
+				);
+			this.renderWorkingDirField(
+				details,
+				launcher,
+				'Optional, relative to the vault root. Overrides the global working directory setting. Only affects "py" scripts; "js" scripts always resolve their own path from the vault root regardless.'
+			);
+		}
+
+		if (launcher.type === "sequence") this.renderSequenceSteps(details, launcher);
+	}
+
+	/** Shared "working directory" text field, reused by terminal, app, and script's advanced sections. Just the description text differs. */
+	private renderWorkingDirField(containerEl: HTMLElement, launcher: Launcher, desc: string): void {
+		new Setting(containerEl)
 			.setName("Working directory")
-			.setDesc("Optional, relative to the vault root. Overrides the global working directory setting for this launcher only.")
+			.setDesc(desc)
 			.addText((text) =>
 				text
 					.setPlaceholder("(Uses the global setting)")
@@ -774,37 +916,22 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 	}
 
 	/**
-	 * Six-dot grip handle at the start of a launcher row. Drag it to reorder with the mouse,
-	 * or focus it and use ArrowUp/ArrowDown for the same thing from the keyboard, matching
-	 * the pattern other Obsidian plugins (e.g. QuickAdd) use for reorderable lists.
+	 * Six-dot grip handle at the start of a launcher row. Drag it with the mouse (or touch) for
+	 * a real floating drag: the row detaches and follows the pointer, other rows slide out of
+	 * the way with a CSS transition to open a gap. Focus it and use ArrowUp/ArrowDown for the
+	 * same result from the keyboard.
 	 */
 	private attachDragHandle(rowEl: HTMLElement, launcher: Launcher): void {
 		const grip = rowEl.createDiv({ cls: "open-anything-drag-handle" });
-		grip.setAttribute("draggable", "true");
 		grip.setAttribute("tabindex", "0");
 		grip.setAttribute("role", "button");
 		grip.setAttribute("aria-label", "Drag to reorder, or use arrow keys");
 		setIcon(grip, "grip-vertical");
 		rowEl.prepend(grip);
 
-		grip.addEventListener("dragstart", (evt) => {
-			this.draggedLauncherId = launcher.id;
-			evt.dataTransfer?.setData("text/plain", launcher.id);
-		});
-
-		rowEl.addEventListener("dragover", (evt) => {
-			if (!this.draggedLauncherId || this.draggedLauncherId === launcher.id) return;
-			evt.preventDefault();
-			rowEl.classList.add("open-anything-drag-over");
-		});
-		rowEl.addEventListener("dragleave", () => rowEl.classList.remove("open-anything-drag-over"));
-		rowEl.addEventListener("drop", (evt) => {
-			evt.preventDefault();
-			rowEl.classList.remove("open-anything-drag-over");
-			const draggedId = this.draggedLauncherId;
-			this.draggedLauncherId = null;
-			if (!draggedId || draggedId === launcher.id) return;
-			void this.reorderLaunchers(draggedId, launcher.id);
+		grip.addEventListener("pointerdown", (evt: PointerEvent) => {
+			if (evt.button !== 0) return; // primary mouse button / touch only, ignore right/middle click
+			this.startDrag(evt, rowEl, launcher.id);
 		});
 
 		grip.addEventListener("keydown", (evt: KeyboardEvent) => {
@@ -812,6 +939,94 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 			evt.preventDefault();
 			void this.moveLauncher(launcher.id, evt.key === "ArrowUp" ? -1 : 1);
 		});
+	}
+
+	/** Begins a pointer-driven drag: measures every row's original position once, then lifts the dragged row into `position: fixed` so it can follow the cursor freely. */
+	private startDrag(evt: PointerEvent, rowEl: HTMLElement, launcherId: string): void {
+		evt.preventDefault();
+		const list = rowEl.parentElement;
+		if (!list) return;
+
+		const rows = Array.from(list.querySelectorAll<HTMLElement>(":scope > .open-anything-row"));
+		const startIndex = rows.indexOf(rowEl);
+		if (startIndex === -1) return;
+
+		const rowRect = rowEl.getBoundingClientRect();
+		const others = rows
+			.map((el, originalIndex) => ({ el, originalIndex, rect: el.getBoundingClientRect() }))
+			.filter((r) => r.originalIndex !== startIndex)
+			.map((r) => ({ el: r.el, originalIndex: r.originalIndex, centerY: r.rect.top + r.rect.height / 2 }));
+
+		this.dragState = {
+			launcherId,
+			rowEl,
+			startIndex,
+			currentIndex: startIndex,
+			pointerOffsetY: evt.clientY - rowRect.top,
+			rowHeight: rowRect.height,
+			others,
+		};
+
+		rowEl.classList.add("open-anything-dragging");
+		rowEl.style.width = `${rowRect.width}px`;
+		rowEl.style.left = `${rowRect.left}px`;
+		rowEl.style.top = `${rowRect.top}px`;
+		activeDocument.body.classList.add("open-anything-is-dragging");
+
+		activeDocument.addEventListener("pointermove", this.onDragPointerMove);
+		activeDocument.addEventListener("pointerup", this.onDragPointerUp, { once: true });
+	}
+
+	/**
+	 * Bound once as a class field (not a method) so the same function reference can be passed to
+	 * both addEventListener and removeEventListener; an inline arrow function on every drag start
+	 * would be a fresh reference each time and couldn't be unregistered correctly.
+	 */
+	private readonly onDragPointerMove = (evt: PointerEvent): void => {
+		const state = this.dragState;
+		if (!state) return;
+		evt.preventDefault();
+
+		state.rowEl.style.top = `${evt.clientY - state.pointerOffsetY}px`;
+
+		// How many other rows now sit above the cursor is exactly the array index the dragged
+		// launcher should land at, since removing it and reinserting there is what "above" means.
+		const newIndex = state.others.filter((o) => o.centerY < evt.clientY).length;
+		if (newIndex === state.currentIndex) return;
+		state.currentIndex = newIndex;
+
+		// For each other row, work out its final position in the reordered array (removing the
+		// dragged row, then reinserting it at newIndex) and shift by exactly the difference
+		// between that and its original slot. This always resolves to -1, 0, or +1 row-heights,
+		// regardless of how far the drag travels, matching how a single-item move naturally
+		// only displaces the rows strictly between the old and new position.
+		for (const other of state.others) {
+			const posAfterRemoval = other.originalIndex < state.startIndex ? other.originalIndex : other.originalIndex - 1;
+			const finalPos = posAfterRemoval >= newIndex ? posAfterRemoval + 1 : posAfterRemoval;
+			const shift = finalPos - other.originalIndex;
+			other.el.style.transform = shift === 0 ? "" : `translateY(${shift * state.rowHeight}px)`;
+		}
+	};
+
+	private readonly onDragPointerUp = (): void => {
+		const state = this.dragState;
+		if (!state) return;
+		this.dragState = null;
+		activeDocument.removeEventListener("pointermove", this.onDragPointerMove);
+		activeDocument.body.classList.remove("open-anything-is-dragging");
+		void this.commitReorder(state.launcherId, state.startIndex, state.currentIndex);
+	};
+
+	/** Applies the final reorder to settings, then rebuilds. Rebuilding always happens, even when the index didn't change, so the lifted row and any transformed siblings reset to a clean DOM state. */
+	private async commitReorder(launcherId: string, fromIndex: number, toIndex: number): Promise<void> {
+		if (fromIndex !== toIndex) {
+			const launchers = this.plugin.settings.launchers;
+			const [moved] = launchers.splice(fromIndex, 1);
+			launchers.splice(toIndex, 0, moved);
+			await this.plugin.saveSettings();
+		}
+		this.build();
+		this.focusGripHandle(launcherId);
 	}
 
 	/** Moves a launcher up or down by one position (delta -1 or +1), then re-renders and restores keyboard focus to its grip handle. */
@@ -827,72 +1042,13 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		this.focusGripHandle(id);
 	}
 
-	/** Moves draggedId to sit just before targetId, then re-renders and restores keyboard focus. */
-	private async reorderLaunchers(draggedId: string, targetId: string): Promise<void> {
-		const launchers = this.plugin.settings.launchers;
-		const fromIndex = launchers.findIndex((l) => l.id === draggedId);
-		const toIndex = launchers.findIndex((l) => l.id === targetId);
-		if (fromIndex === -1 || toIndex === -1) return;
-
-		const [moved] = launchers.splice(fromIndex, 1);
-		launchers.splice(fromIndex < toIndex ? toIndex - 1 : toIndex, 0, moved);
-		await this.plugin.saveSettings();
-		this.build();
-		this.focusGripHandle(draggedId);
-	}
-
 	private focusGripHandle(launcherId: string): void {
 		const row = this.containerEl.querySelector(`[data-launcher-id="${launcherId}"]`);
 		row?.querySelector<HTMLElement>(".open-anything-drag-handle")?.focus();
 	}
 
-	/** Extra fields for "script" launchers: which runtime, plus optional arguments. Sits directly under the summary row. */
-	private renderScriptDetails(containerEl: HTMLElement, launcher: Launcher): void {
-		const details = containerEl.createDiv({ cls: "open-anything-launcher-details" });
-
-		new Setting(details)
-			.setName("Runtime")
-			.setDesc('"js" runs in Obsidian\'s own process; "py" is spawned as a separate Python process and can\'t access the vault directly.')
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({ js: "JavaScript (.js)", py: "Python (.py)" })
-					.setValue(launcher.scriptRuntime ?? "js")
-					.onChange(async (value) => {
-						launcher.scriptRuntime = value as ScriptRuntime;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(details)
-			.setName("Arguments")
-			.setDesc("Optional, space-separated. Passed to the script as-is; quoting isn't supported yet.")
-			.addText((text) =>
-				text
-					.setPlaceholder("--flag value")
-					.setValue(launcher.scriptArgs ?? "")
-					.onChange(async (value) => {
-						launcher.scriptArgs = value;
-						await this.plugin.saveSettings();
-					})
-			);
-
-		new Setting(details)
-			.setName("Working directory")
-			.setDesc('Optional, relative to the vault root. Overrides the global working directory setting. Only affects "py" scripts; "js" scripts always resolve their own path from the vault root regardless.')
-			.addText((text) =>
-				text
-					.setPlaceholder("(Uses the global setting)")
-					.setValue(launcher.customWorkingDir ?? "")
-					.onChange(async (value) => {
-						launcher.customWorkingDir = value;
-						await this.plugin.saveSettings();
-					})
-			);
-	}
-
 	/** Extra fields for "sequence" launchers: the ordered list of steps, add-step picker, and stop-on-error toggle. */
-	private renderSequenceDetails(containerEl: HTMLElement, launcher: Launcher): void {
-		const details = containerEl.createDiv({ cls: "open-anything-launcher-details" });
+	private renderSequenceSteps(details: HTMLElement, launcher: Launcher): void {
 		const steps = launcher.sequenceSteps ?? (launcher.sequenceSteps = []);
 
 		new Setting(details).setName("Steps").setDesc("Runs top to bottom. A sequence can't contain another sequence.").setHeading();
