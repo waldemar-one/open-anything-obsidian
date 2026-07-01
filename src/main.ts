@@ -55,6 +55,12 @@ interface Launcher {
 	sequenceSteps?: string[];
 	/** Only used when type === "sequence". If true, stop at the first step that fails; if false, run all steps regardless. */
 	sequenceStopOnError?: boolean;
+	/**
+	 * Vault-relative folder override for "terminal", "app", and "script" launchers.
+	 * Empty means fall back to the global Working directory setting. Ignored for
+	 * "url" and "sequence" (a sequence's steps each resolve their own directory).
+	 */
+	customWorkingDir?: string;
 }
 
 interface OpenAnythingSettings {
@@ -199,7 +205,7 @@ export default class OpenAnythingPlugin extends Plugin {
 				return;
 			}
 
-			const cwd = this.getWorkingDirectory();
+			const cwd = this.getWorkingDirectory(launcher);
 			if (!cwd) {
 				new Notice("Couldn't resolve the vault path.");
 				return;
@@ -254,15 +260,20 @@ export default class OpenAnythingPlugin extends Plugin {
 		}
 	}
 
-	private getWorkingDirectory(): string | null {
+	private getWorkingDirectory(launcher: Launcher): string | null {
 		const adapter = this.app.vault.adapter;
 		if (!(adapter instanceof FileSystemAdapter)) return null;
 		const vaultPath = adapter.getBasePath();
 
+		if (launcher.customWorkingDir?.trim()) {
+			// Lazy require: only ever touched on desktop, after the Platform check above.
+			const path = nodeRequire<typeof import("path")>("path");
+			return path.join(vaultPath, launcher.customWorkingDir.trim());
+		}
+
 		if (this.settings.workingDirMode === "active-file") {
 			const activeFile = this.app.workspace.getActiveFile();
 			if (activeFile) {
-				// Lazy require: only ever touched on desktop, after the Platform check above.
 				const path = nodeRequire<typeof import("path")>("path");
 				const fileDir = path.dirname(activeFile.path);
 				return fileDir === "." ? vaultPath : path.join(vaultPath, fileDir);
@@ -740,8 +751,26 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 				})
 		);
 
+		if (launcher.type === "terminal" || launcher.type === "app") this.renderWorkingDirField(containerEl, launcher);
 		if (launcher.type === "script") this.renderScriptDetails(containerEl, launcher);
 		if (launcher.type === "sequence") this.renderSequenceDetails(containerEl, launcher);
+	}
+
+	/** Optional per-launcher folder override, shown for "terminal", "app", and (inside its own details block) "script". */
+	private renderWorkingDirField(containerEl: HTMLElement, launcher: Launcher): void {
+		const details = containerEl.createDiv({ cls: "open-anything-launcher-details" });
+		new Setting(details)
+			.setName("Working directory")
+			.setDesc("Optional, relative to the vault root. Overrides the global working directory setting for this launcher only.")
+			.addText((text) =>
+				text
+					.setPlaceholder("(Uses the global setting)")
+					.setValue(launcher.customWorkingDir ?? "")
+					.onChange(async (value) => {
+						launcher.customWorkingDir = value;
+						await this.plugin.saveSettings();
+					})
+			);
 	}
 
 	/**
@@ -843,6 +872,19 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					.setValue(launcher.scriptArgs ?? "")
 					.onChange(async (value) => {
 						launcher.scriptArgs = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(details)
+			.setName("Working directory")
+			.setDesc('Optional, relative to the vault root. Overrides the global working directory setting. Only affects "py" scripts; "js" scripts always resolve their own path from the vault root regardless.')
+			.addText((text) =>
+				text
+					.setPlaceholder("(Uses the global setting)")
+					.setValue(launcher.customWorkingDir ?? "")
+					.onChange(async (value) => {
+						launcher.customWorkingDir = value;
 						await this.plugin.saveSettings();
 					})
 			);
