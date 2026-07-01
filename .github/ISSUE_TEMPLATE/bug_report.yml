@@ -1,0 +1,74 @@
+name: Bug report
+description: Something isn't working the way it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected instead.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: How can this be triggered, step by step?
+      placeholder: |
+        1. Add a Terminal launcher with target "..."
+        2. Run it via the command palette
+        3. See error
+    validations:
+      required: true
+
+  - type: dropdown
+    id: launcher-type
+    attributes:
+      label: Launcher type involved
+      options:
+        - Terminal
+        - App
+        - Website
+        - Not launcher-specific / settings UI
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - Android
+        - iOS
+    validations:
+      required: true
+
+  - type: input
+    id: obsidian-version
+    attributes:
+      label: Obsidian version
+      description: Settings → General → top of the page
+      placeholder: "1.7.2"
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Open Anything version
+      description: Settings → Community plugins → Open Anything
+      placeholder: "1.1.7"
+    validations:
+      required: true
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors, if any
+      description: Ctrl+Shift+I (Cmd+Option+I on Mac) → Console tab. Paste anything relevant.
+      render: shell
