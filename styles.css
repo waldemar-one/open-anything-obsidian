@@ -37,3 +37,30 @@
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 }
+
+.open-anything-row {
+	position: relative;
+}
+
+.open-anything-drag-handle {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.5em;
+	cursor: grab;
+	color: var(--text-faint);
+	flex-shrink: 0;
+}
+
+.open-anything-drag-handle:hover,
+.open-anything-drag-handle:focus-visible {
+	color: var(--text-normal);
+}
+
+.open-anything-drag-handle:active {
+	cursor: grabbing;
+}
+
+.open-anything-drag-over {
+	box-shadow: 0 -2px 0 0 var(--interactive-accent);
+}

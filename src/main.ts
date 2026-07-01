@@ -505,6 +505,8 @@ export default class OpenAnythingPlugin extends Plugin {
 
 class OpenAnythingSettingTab extends PluginSettingTab {
 	plugin: OpenAnythingPlugin;
+	/** id of the launcher currently being dragged, set on dragstart and read on drop. Plain field rather than dataTransfer since this never leaves the same window. */
+	private draggedLauncherId: string | null = null;
 
 	constructor(app: App, plugin: OpenAnythingPlugin) {
 		super(app, plugin);
@@ -663,6 +665,8 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 	private renderLauncherRow(containerEl: HTMLElement, launcher: Launcher): void {
 		const row = new Setting(containerEl);
 		row.settingEl.classList.add("open-anything-row");
+		row.settingEl.setAttribute("data-launcher-id", launcher.id);
+		this.attachDragHandle(row.settingEl, launcher);
 
 		row.addText((text) => {
 			text
@@ -738,6 +742,79 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		if (launcher.type === "script") this.renderScriptDetails(containerEl, launcher);
 		if (launcher.type === "sequence") this.renderSequenceDetails(containerEl, launcher);
+	}
+
+	/**
+	 * Six-dot grip handle at the start of a launcher row. Drag it to reorder with the mouse,
+	 * or focus it and use ArrowUp/ArrowDown for the same thing from the keyboard, matching
+	 * the pattern other Obsidian plugins (e.g. QuickAdd) use for reorderable lists.
+	 */
+	private attachDragHandle(rowEl: HTMLElement, launcher: Launcher): void {
+		const grip = rowEl.createDiv({ cls: "open-anything-drag-handle" });
+		grip.setAttribute("draggable", "true");
+		grip.setAttribute("tabindex", "0");
+		grip.setAttribute("role", "button");
+		grip.setAttribute("aria-label", "Drag to reorder, or use arrow keys");
+		setIcon(grip, "grip-vertical");
+		rowEl.prepend(grip);
+
+		grip.addEventListener("dragstart", (evt) => {
+			this.draggedLauncherId = launcher.id;
+			evt.dataTransfer?.setData("text/plain", launcher.id);
+		});
+
+		rowEl.addEventListener("dragover", (evt) => {
+			if (!this.draggedLauncherId || this.draggedLauncherId === launcher.id) return;
+			evt.preventDefault();
+			rowEl.classList.add("open-anything-drag-over");
+		});
+		rowEl.addEventListener("dragleave", () => rowEl.classList.remove("open-anything-drag-over"));
+		rowEl.addEventListener("drop", (evt) => {
+			evt.preventDefault();
+			rowEl.classList.remove("open-anything-drag-over");
+			const draggedId = this.draggedLauncherId;
+			this.draggedLauncherId = null;
+			if (!draggedId || draggedId === launcher.id) return;
+			void this.reorderLaunchers(draggedId, launcher.id);
+		});
+
+		grip.addEventListener("keydown", (evt: KeyboardEvent) => {
+			if (evt.key !== "ArrowUp" && evt.key !== "ArrowDown") return;
+			evt.preventDefault();
+			void this.moveLauncher(launcher.id, evt.key === "ArrowUp" ? -1 : 1);
+		});
+	}
+
+	/** Moves a launcher up or down by one position (delta -1 or +1), then re-renders and restores keyboard focus to its grip handle. */
+	private async moveLauncher(id: string, delta: -1 | 1): Promise<void> {
+		const launchers = this.plugin.settings.launchers;
+		const index = launchers.findIndex((l) => l.id === id);
+		const target = index + delta;
+		if (index === -1 || target < 0 || target >= launchers.length) return;
+
+		[launchers[index], launchers[target]] = [launchers[target], launchers[index]];
+		await this.plugin.saveSettings();
+		this.build();
+		this.focusGripHandle(id);
+	}
+
+	/** Moves draggedId to sit just before targetId, then re-renders and restores keyboard focus. */
+	private async reorderLaunchers(draggedId: string, targetId: string): Promise<void> {
+		const launchers = this.plugin.settings.launchers;
+		const fromIndex = launchers.findIndex((l) => l.id === draggedId);
+		const toIndex = launchers.findIndex((l) => l.id === targetId);
+		if (fromIndex === -1 || toIndex === -1) return;
+
+		const [moved] = launchers.splice(fromIndex, 1);
+		launchers.splice(fromIndex < toIndex ? toIndex - 1 : toIndex, 0, moved);
+		await this.plugin.saveSettings();
+		this.build();
+		this.focusGripHandle(draggedId);
+	}
+
+	private focusGripHandle(launcherId: string): void {
+		const row = this.containerEl.querySelector(`[data-launcher-id="${launcherId}"]`);
+		row?.querySelector<HTMLElement>(".open-anything-drag-handle")?.focus();
 	}
 
 	/** Extra fields for "script" launchers: which runtime, plus optional arguments. Sits directly under the summary row. */
