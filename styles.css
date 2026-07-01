@@ -20,8 +20,23 @@
 	height: 1.2em;
 }
 
+/* Visually distinct "card" wrapper used for every top-level group (Launchers, Behavior,
+   Platform-specific), so the settings pane reads as separated blocks instead of one long
+   flat list of same-looking rows. */
+.open-anything-section {
+	margin-bottom: 1.5em;
+	padding: 1em 1.2em;
+	background-color: var(--background-secondary);
+	border-radius: var(--radius-m);
+}
+
+.open-anything-section-heading {
+	border: none;
+	padding-top: 0;
+}
+
 .open-anything-launcher-details {
-	margin: 0 0 1em 2em;
+	margin: 0.25em 0 1em 2.6em;
 	padding: 0.5em 1em;
 	border-left: 2px solid var(--background-modifier-border);
 }
@@ -31,7 +46,7 @@
 }
 
 .open-anything-footer {
-	margin-top: 2em;
+	margin-top: 0.5em;
 	padding-top: 1em;
 	border-top: 1px solid var(--background-modifier-border);
 	color: var(--text-muted);
@@ -46,19 +61,29 @@
 	transition: transform 150ms ease;
 }
 
-.open-anything-drag-handle {
+.open-anything-drag-handle,
+.open-anything-advanced-toggle {
 	display: flex;
 	align-items: center;
 	justify-content: center;
 	width: 1.5em;
-	cursor: grab;
 	color: var(--text-faint);
 	flex-shrink: 0;
+}
+
+.open-anything-drag-handle {
+	cursor: grab;
 	touch-action: none;
 }
 
+.open-anything-advanced-toggle {
+	cursor: pointer;
+}
+
 .open-anything-drag-handle:hover,
-.open-anything-drag-handle:focus-visible {
+.open-anything-drag-handle:focus-visible,
+.open-anything-advanced-toggle:hover,
+.open-anything-advanced-toggle:focus-visible {
 	color: var(--text-normal);
 }
 

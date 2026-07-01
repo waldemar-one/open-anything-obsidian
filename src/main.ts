@@ -559,6 +559,10 @@ interface LauncherDragState {
 	pointerOffsetY: number;
 	rowHeight: number;
 	others: { el: HTMLElement; originalIndex: number; centerY: number }[];
+	/** Vertical bounds (viewport coordinates) the floating card's top is clamped to, so it can
+	 * never fly up over Obsidian's own settings modal header or down past the visible pane. */
+	minTop: number;
+	maxTop: number;
 }
 
 class OpenAnythingSettingTab extends PluginSettingTab {
@@ -567,6 +571,8 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 	private dragState: LauncherDragState | null = null;
 	/** UI-only, not persisted: which launchers currently have their advanced section expanded. Resets when the settings tab is reopened. */
 	private expandedLauncherIds = new Set<string>();
+	/** UI-only, not persisted: whether the platform-specific (macOS/Windows/Linux/custom template) section is expanded. Collapsed by default since these are rarely touched. */
+	private platformSectionExpanded = false;
 
 	constructor(app: App, plugin: OpenAnythingPlugin) {
 		super(app, plugin);
@@ -581,26 +587,17 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName("Notifications").setHeading();
-		new Setting(containerEl)
-			.setName("Show notices")
-			.setDesc('Show a confirmation notice on successful launch ("opening: X"). Errors and warnings always show regardless.')
-			.addToggle((toggle) =>
-				toggle.setValue(this.plugin.settings.showNotices).onChange(async (value) => {
-					this.plugin.settings.showNotices = value;
-					await this.plugin.saveSettings();
-				})
-			);
+		// ---------- Launchers (primary section) ----------
+		const launchersSection = this.renderSection(
+			containerEl,
+			"Launchers",
+			"Each row gets its own command, so you can bind it to a hotkey in the hotkeys settings."
+		);
 
-		new Setting(containerEl)
-			.setName("Launchers")
-			.setDesc("Each row below gets its own command, so you can bind it to a hotkey in the hotkeys settings.")
-			.setHeading();
-
-		const list = containerEl.createDiv();
+		const list = launchersSection.createDiv();
 		this.plugin.settings.launchers.forEach((launcher) => this.renderLauncherRow(list, launcher));
 
-		const addRow = new Setting(containerEl)
+		const addRow = new Setting(launchersSection)
 			.setName("Add launcher")
 			.setDesc("Terminal and app run on desktop only. Website also works on mobile. Script runs JavaScript or Python. Sequence chains other launchers together.");
 		addRow.addButton((button: ButtonComponent) =>
@@ -634,12 +631,24 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 			})
 		);
 
-		new Setting(containerEl)
-			.setName("Terminal, app, and script")
-			.setDesc('Shared by every "terminal", "app", and "script" launcher above. Websites and sequences don\'t need any of this.')
-			.setHeading();
+		// ---------- Behavior (global defaults every launcher shares unless overridden) ----------
+		const behaviorSection = this.renderSection(
+			containerEl,
+			"Behavior",
+			"Applies to every launcher by default. Terminal, app, and script launchers can override the working directory individually under their own advanced options."
+		);
 
-		new Setting(containerEl)
+		new Setting(behaviorSection)
+			.setName("Show notices")
+			.setDesc('Show a confirmation notice on successful launch ("opening: X"). Errors and warnings always show regardless.')
+			.addToggle((toggle) =>
+				toggle.setValue(this.plugin.settings.showNotices).onChange(async (value) => {
+					this.plugin.settings.showNotices = value;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(behaviorSection)
 			.setName("Working directory")
 			.setDesc("Where terminal, app, and script launchers start from.")
 			.addDropdown((dropdown) =>
@@ -655,75 +664,87 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl)
+		new Setting(behaviorSection)
 			.setName("Python command")
 			.setDesc('Used to run "script" launchers set to Python. Change this if the default doesn\'t work for your system.')
 			.addText((text) =>
-				text
-					.setValue(this.plugin.settings.pythonCommand)
-					.onChange(async (value) => {
-						this.plugin.settings.pythonCommand = value;
-						await this.plugin.saveSettings();
-					})
+				text.setValue(this.plugin.settings.pythonCommand).onChange(async (value) => {
+					this.plugin.settings.pythonCommand = value;
+					await this.plugin.saveSettings();
+				})
 			);
 
-		new Setting(containerEl).setName("macOS").setDesc("Terminal launchers only.").setHeading();
-		new Setting(containerEl)
-			.setName("Terminal app")
-			.setDesc("As it appears in Spotlight: Terminal, iTerm, Warp, etc.")
-			.addText((text) =>
-				text
-					.setPlaceholder("Terminal")
-					.setValue(this.plugin.settings.macTerminalApp)
-					.onChange(async (value) => {
-						this.plugin.settings.macTerminalApp = value;
-						await this.plugin.saveSettings();
-					})
-			);
+		// ---------- Platform-specific (collapsed by default, rarely touched) ----------
+		const platformSection = this.renderCollapsibleSection(
+			containerEl,
+			"Platform-specific",
+			"Which terminal to use on each OS, and a custom launch template override. Only affects Terminal launchers.",
+			this.platformSectionExpanded,
+			() => {
+				this.platformSectionExpanded = !this.platformSectionExpanded;
+				this.build();
+			}
+		);
 
-		new Setting(containerEl).setName("Windows").setDesc("Terminal launchers only.").setHeading();
-		new Setting(containerEl)
-			.setName("Launch via")
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({ wt: "Windows Terminal (wt)", cmd: "cmd.exe", powershell: "PowerShell" })
-					.setValue(this.plugin.settings.winTerminalApp)
-					.onChange(async (value) => {
-						this.plugin.settings.winTerminalApp = value as WinTerminal;
-						await this.plugin.saveSettings();
-					})
-			);
+		if (this.platformSectionExpanded) {
+			new Setting(platformSection).setName("macOS").setHeading();
+			new Setting(platformSection)
+				.setName("Terminal app")
+				.setDesc("As it appears in Spotlight: Terminal, iTerm, Warp, etc.")
+				.addText((text) =>
+					text
+						.setPlaceholder("Terminal")
+						.setValue(this.plugin.settings.macTerminalApp)
+						.onChange(async (value) => {
+							this.plugin.settings.macTerminalApp = value;
+							await this.plugin.saveSettings();
+						})
+				);
 
-		new Setting(containerEl).setName("Linux").setDesc("Terminal launchers only.").setHeading();
-		new Setting(containerEl)
-			.setName("Terminal")
-			.addDropdown((dropdown) =>
-				dropdown
-					.addOptions({
-						"gnome-terminal": "GNOME Terminal",
-						konsole: "Konsole",
-						"x-terminal-emulator": "System default",
-					})
-					.setValue(this.plugin.settings.linuxTerminal)
-					.onChange(async (value) => {
-						this.plugin.settings.linuxTerminal = value as LinuxTerminal;
-						await this.plugin.saveSettings();
-					})
-			);
+			new Setting(platformSection).setName("Windows").setHeading();
+			new Setting(platformSection)
+				.setName("Launch via")
+				.addDropdown((dropdown) =>
+					dropdown
+						.addOptions({ wt: "Windows Terminal (wt)", cmd: "cmd.exe", powershell: "PowerShell" })
+						.setValue(this.plugin.settings.winTerminalApp)
+						.onChange(async (value) => {
+							this.plugin.settings.winTerminalApp = value as WinTerminal;
+							await this.plugin.saveSettings();
+						})
+				);
 
-		new Setting(containerEl).setName("Custom launch template").setDesc("Terminal launchers only.").setHeading();
-		new Setting(containerEl)
-			.setName("Override everything above")
-			.setDesc("Optional. If set, it replaces all the platform auto-detection for Terminal launchers. Placeholders: {cwd} and {cmd}. Example for kitty: kitty --directory {cwd} {cmd}")
-			.addText((text) =>
-				text
-					.setPlaceholder("kitty --directory {cwd} {cmd}")
-					.setValue(this.plugin.settings.customLaunchTemplate)
-					.onChange(async (value) => {
-						this.plugin.settings.customLaunchTemplate = value;
-						await this.plugin.saveSettings();
-					})
-			);
+			new Setting(platformSection).setName("Linux").setHeading();
+			new Setting(platformSection)
+				.setName("Terminal")
+				.addDropdown((dropdown) =>
+					dropdown
+						.addOptions({
+							"gnome-terminal": "GNOME Terminal",
+							konsole: "Konsole",
+							"x-terminal-emulator": "System default",
+						})
+						.setValue(this.plugin.settings.linuxTerminal)
+						.onChange(async (value) => {
+							this.plugin.settings.linuxTerminal = value as LinuxTerminal;
+							await this.plugin.saveSettings();
+						})
+				);
+
+			new Setting(platformSection).setName("Custom launch template").setHeading();
+			new Setting(platformSection)
+				.setName("Override everything above")
+				.setDesc("Optional. If set, it replaces all the platform auto-detection for Terminal launchers. Placeholders: {cwd} and {cmd}. Example for kitty: kitty --directory {cwd} {cmd}")
+				.addText((text) =>
+					text
+						.setPlaceholder("kitty --directory {cwd} {cmd}")
+						.setValue(this.plugin.settings.customLaunchTemplate)
+						.onChange(async (value) => {
+							this.plugin.settings.customLaunchTemplate = value;
+							await this.plugin.saveSettings();
+						})
+				);
+		}
 
 		const footer = containerEl.createDiv({ cls: "open-anything-footer" });
 		footer.createSpan({ text: "Open Anything, by waldemar-one. " });
@@ -733,11 +754,40 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		});
 	}
 
+	/** Creates a visually distinct "card" section (heading + description inside a bordered, padded container) and returns it so callers append the section's actual settings into it, not into the raw settings pane. */
+	private renderSection(containerEl: HTMLElement, name: string, desc: string): HTMLElement {
+		const section = containerEl.createDiv({ cls: "open-anything-section" });
+		const heading = new Setting(section).setName(name).setDesc(desc).setHeading();
+		heading.settingEl.classList.add("open-anything-section-heading");
+		return section;
+	}
+
+	/** Same "card" treatment as renderSection, plus a chevron in the heading row that expands or collapses the section. The caller is responsible for actually skipping its body content when collapsed. */
+	private renderCollapsibleSection(
+		containerEl: HTMLElement,
+		name: string,
+		desc: string,
+		expanded: boolean,
+		onToggle: () => void
+	): HTMLElement {
+		const section = containerEl.createDiv({ cls: "open-anything-section" });
+		const heading = new Setting(section).setName(name).setDesc(desc).setHeading();
+		heading.settingEl.classList.add("open-anything-section-heading");
+		heading.addExtraButton((button) =>
+			button
+				.setIcon(expanded ? "chevron-down" : "chevron-right")
+				.setTooltip(expanded ? "Collapse" : "Expand")
+				.onClick(onToggle)
+		);
+		return section;
+	}
+
 	private renderLauncherRow(containerEl: HTMLElement, launcher: Launcher): void {
 		const row = new Setting(containerEl);
 		row.settingEl.classList.add("open-anything-row");
 		row.settingEl.setAttribute("data-launcher-id", launcher.id);
 		this.attachDragHandle(row.settingEl, launcher);
+		this.attachAdvancedToggle(row.settingEl, launcher);
 
 		row.addText((text) => {
 			text
@@ -787,19 +837,10 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 			});
 		}
 
-		row.addButton((button: ButtonComponent) => {
-			const expanded = this.expandedLauncherIds.has(launcher.id);
-			button
-				.setIcon(expanded ? "chevron-down" : "chevron-right")
-				.setTooltip(expanded ? "Hide advanced options" : "Show advanced options")
-				.onClick(() => {
-					if (expanded) this.expandedLauncherIds.delete(launcher.id);
-					else this.expandedLauncherIds.add(launcher.id);
-					this.build();
-				});
-		});
-
-		row.addButton((button: ButtonComponent) => {
+		// addExtraButton (not addButton) is Obsidian's own convention for lightweight, borderless
+		// icon-only secondary actions in a settings row, the same visual weight core Obsidian
+		// settings use for things like "reset to default". Matches the platform, not custom CSS.
+		row.addExtraButton((button) => {
 			button
 				.setIcon(launcher.icon || "image")
 				.setTooltip(launcher.icon ? `Sidebar icon: ${launcher.icon} (click to change)` : "No sidebar icon (click to add one)")
@@ -813,7 +854,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 				});
 		});
 
-		row.addButton((button: ButtonComponent) =>
+		row.addExtraButton((button) =>
 			button
 				.setIcon("trash")
 				.setTooltip("Remove")
@@ -941,6 +982,36 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		});
 	}
 
+	/**
+	 * Small plain-icon toggle for the collapsible advanced section, sitting right next to the
+	 * drag handle rather than as a full button on the far side of the row. Same minimal, no-chrome
+	 * visual treatment as the grip handle itself, since neither is a "primary" action.
+	 */
+	private attachAdvancedToggle(rowEl: HTMLElement, launcher: Launcher): void {
+		const expanded = this.expandedLauncherIds.has(launcher.id);
+		const toggle = rowEl.createDiv({ cls: "open-anything-advanced-toggle" });
+		toggle.setAttribute("tabindex", "0");
+		toggle.setAttribute("role", "button");
+		toggle.setAttribute("aria-label", expanded ? "Hide advanced options" : "Show advanced options");
+		setIcon(toggle, expanded ? "chevron-down" : "chevron-right");
+
+		const grip = rowEl.querySelector(".open-anything-drag-handle");
+		if (grip) grip.after(toggle);
+		else rowEl.prepend(toggle);
+
+		const onToggle = () => {
+			if (expanded) this.expandedLauncherIds.delete(launcher.id);
+			else this.expandedLauncherIds.add(launcher.id);
+			this.build();
+		};
+		toggle.addEventListener("click", onToggle);
+		toggle.addEventListener("keydown", (evt: KeyboardEvent) => {
+			if (evt.key !== "Enter" && evt.key !== " ") return;
+			evt.preventDefault();
+			onToggle();
+		});
+	}
+
 	/** Begins a pointer-driven drag: measures every row's original position once, then lifts the dragged row into `position: fixed` so it can follow the cursor freely. */
 	private startDrag(evt: PointerEvent, rowEl: HTMLElement, launcherId: string): void {
 		evt.preventDefault();
@@ -957,6 +1028,10 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 			.filter((r) => r.originalIndex !== startIndex)
 			.map((r) => ({ el: r.el, originalIndex: r.originalIndex, centerY: r.rect.top + r.rect.height / 2 }));
 
+		// Clamp to the settings pane's own content area (this.containerEl), not the viewport, so
+		// the floating card can't rise above Obsidian's modal header or drop below the visible pane.
+		const bounds = this.containerEl.getBoundingClientRect();
+
 		this.dragState = {
 			launcherId,
 			rowEl,
@@ -965,6 +1040,8 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 			pointerOffsetY: evt.clientY - rowRect.top,
 			rowHeight: rowRect.height,
 			others,
+			minTop: bounds.top,
+			maxTop: bounds.bottom - rowRect.height,
 		};
 
 		rowEl.classList.add("open-anything-dragging");
@@ -975,6 +1052,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		activeDocument.addEventListener("pointermove", this.onDragPointerMove);
 		activeDocument.addEventListener("pointerup", this.onDragPointerUp, { once: true });
+		activeDocument.addEventListener("keydown", this.onDragKeyDown);
 	}
 
 	/**
@@ -987,7 +1065,8 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		if (!state) return;
 		evt.preventDefault();
 
-		state.rowEl.style.top = `${evt.clientY - state.pointerOffsetY}px`;
+		const clampedTop = Math.min(Math.max(evt.clientY - state.pointerOffsetY, state.minTop), state.maxTop);
+		state.rowEl.style.top = `${clampedTop}px`;
 
 		// How many other rows now sit above the cursor is exactly the array index the dragged
 		// launcher should land at, since removing it and reinserting there is what "above" means.
@@ -1013,8 +1092,22 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		if (!state) return;
 		this.dragState = null;
 		activeDocument.removeEventListener("pointermove", this.onDragPointerMove);
+		activeDocument.removeEventListener("keydown", this.onDragKeyDown);
 		activeDocument.body.classList.remove("open-anything-is-dragging");
 		void this.commitReorder(state.launcherId, state.startIndex, state.currentIndex);
+	};
+
+	/** Escape cancels an in-progress drag without touching settings.launchers at all, since nothing was committed to it during the drag, only CSS transforms were applied. */
+	private readonly onDragKeyDown = (evt: KeyboardEvent): void => {
+		if (evt.key !== "Escape" || !this.dragState) return;
+		evt.preventDefault();
+		evt.stopPropagation();
+		this.dragState = null;
+		activeDocument.removeEventListener("pointermove", this.onDragPointerMove);
+		activeDocument.removeEventListener("pointerup", this.onDragPointerUp);
+		activeDocument.removeEventListener("keydown", this.onDragKeyDown);
+		activeDocument.body.classList.remove("open-anything-is-dragging");
+		this.build();
 	};
 
 	/** Applies the final reorder to settings, then rebuilds. Rebuilding always happens, even when the index didn't change, so the lifted row and any transformed siblings reset to a clean DOM state. */
