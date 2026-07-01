@@ -20,6 +20,12 @@ There are currently three launcher types, pick whichever fits:
 
 Add as many launchers as you want with the "+ terminal" / "+ app" / "+ website" buttons in settings. Each one becomes its own command, `Open: <name>`, searchable in Ctrl/Cmd+P and bindable to a hotkey under Settings → Hotkeys. I didn't set any default hotkeys: with an arbitrary number of launchers there's no sane default to guess for you, so it's yours to assign.
 
+## Examples
+
+- **Terminal**: `claude` opens Claude Code in the vault folder. `git status` checks what's changed without leaving Obsidian.
+- **App**: `Spotify` (macOS) or the full path to `Spotify.exe` (Windows) jumps straight to your music, no terminal window in the way.
+- **Website**: `https://obsidian.md/` for a one-key jump to the plugin directory, or any tool you check constantly.
+
 ## Mobile
 
 The plugin loads on mobile, it's not desktop-only. Website launchers genuinely work there. Terminal and App launchers obviously need a real OS process, which mobile doesn't have, so on mobile they just say so with a notice instead of pretending to work or crashing anything.
@@ -43,19 +49,3 @@ Since this plugin works simply by adding commands, it shouldn't conflict with an
 ## Source
 
 `src/main.ts` and the build config are in the repo if you want to dig in or extend it. `npm install`, then `npm run build` to rebuild, `npm run lint` to run the same Obsidian-flavored ESLint checks the review process uses.
-
-## Roadmap
-
-- [x] Three launcher types: terminal, app, website
-- [x] One command and one hotkey per launcher
-- [x] Mobile support that fails gracefully instead of crashing
-- [x] Per-OS terminal picker for macOS, Windows, and Linux
-- [x] Custom launch template override
-- [x] Automated release pipeline with build provenance attestation
-- [ ] Drag-to-reorder launchers
-- [ ] Four launcher types: terminal, app, website, _scripts_
-- [ ] Launch optimization: less delay between hotkey and the terminal actually opening, skip recreating the macOS .command script on every launch, cache the working-directory resolution instead of recomputing it each time
-- [ ] Plugin startup optimization: faster onload, lighter footprint when Obsidian loads the plugin
-- [ ] Specifying the work folder for `terminal` and `app` (optional)
-- [ ] Icon picker per launcher
-- [ ] Adding a command with an icon to the sidebar
