@@ -467,7 +467,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 	private renderLauncherRow(containerEl: HTMLElement, launcher: Launcher): void {
 		const row = new Setting(containerEl);
-		row.settingEl.addClass("open-anything-row");
+		row.settingEl.classList.add("open-anything-row");
 
 		row.addText((text) => {
 			text
@@ -478,7 +478,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 					this.plugin.registerLauncherCommand(launcher);
 				});
-			text.inputEl.addClass("open-anything-name-input");
+			text.inputEl.classList.add("open-anything-name-input");
 		});
 
 		row.addDropdown((dropdown) =>
@@ -507,7 +507,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					launcher.target = value;
 					await this.plugin.saveSettings();
 				});
-			text.inputEl.addClass("open-anything-target-input");
+			text.inputEl.classList.add("open-anything-target-input");
 		});
 
 		row.addButton((button: ButtonComponent) =>
