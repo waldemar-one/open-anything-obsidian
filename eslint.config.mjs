@@ -23,6 +23,7 @@ export default tseslint.config(
 				{
 					brands: [
 						"Open Anything",
+						"Obsidian",
 						"Claude Code",
 						"Spotlight",
 						"iTerm",
@@ -33,6 +34,9 @@ export default tseslint.config(
 						"Konsole",
 						"kitty",
 						"alacritty",
+						"Python",
+						"JavaScript",
+						"GitHub",
 					],
 				},
 			],

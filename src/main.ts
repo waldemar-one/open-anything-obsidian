@@ -527,7 +527,9 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 		const list = containerEl.createDiv();
 		this.plugin.settings.launchers.forEach((launcher) => this.renderLauncherRow(list, launcher));
 
-		const addRow = new Setting(containerEl).setName("Add launcher");
+		const addRow = new Setting(containerEl)
+			.setName("Add launcher")
+			.setDesc("Terminal and app run on desktop only. Website also works on mobile. Script runs JavaScript or Python. Sequence chains other launchers together.");
 		addRow.addButton((button: ButtonComponent) =>
 			button.setButtonText("+ terminal").onClick(async () => {
 				await this.plugin.addLauncher("terminal");
@@ -546,15 +548,27 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 				this.build();
 			})
 		);
+		addRow.addButton((button: ButtonComponent) =>
+			button.setButtonText("+ script").onClick(async () => {
+				await this.plugin.addLauncher("script");
+				this.build();
+			})
+		);
+		addRow.addButton((button: ButtonComponent) =>
+			button.setButtonText("+ sequence").onClick(async () => {
+				await this.plugin.addLauncher("sequence");
+				this.build();
+			})
+		);
 
 		new Setting(containerEl)
-			.setName("Terminal and app")
-			.setDesc('Applies to every "terminal" and "app" launcher above. Websites don\'t need any of this.')
+			.setName("Terminal, app, and script")
+			.setDesc('Shared by every "terminal", "app", and "script" launcher above. Websites and sequences don\'t need any of this.')
 			.setHeading();
 
 		new Setting(containerEl)
 			.setName("Working directory")
-			.setDesc("Where terminal and app launchers start from.")
+			.setDesc("Where terminal, app, and script launchers start from.")
 			.addDropdown((dropdown) =>
 				dropdown
 					.addOptions({
@@ -568,7 +582,19 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl).setName("macOS").setHeading();
+		new Setting(containerEl)
+			.setName("Python command")
+			.setDesc('Used to run "script" launchers set to Python. Change this if the default doesn\'t work for your system.')
+			.addText((text) =>
+				text
+					.setValue(this.plugin.settings.pythonCommand)
+					.onChange(async (value) => {
+						this.plugin.settings.pythonCommand = value;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl).setName("macOS").setDesc("Terminal launchers only.").setHeading();
 		new Setting(containerEl)
 			.setName("Terminal app")
 			.setDesc("As it appears in Spotlight: Terminal, iTerm, Warp, etc.")
@@ -582,7 +608,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl).setName("Windows").setHeading();
+		new Setting(containerEl).setName("Windows").setDesc("Terminal launchers only.").setHeading();
 		new Setting(containerEl)
 			.setName("Launch via")
 			.addDropdown((dropdown) =>
@@ -595,7 +621,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl).setName("Linux").setHeading();
+		new Setting(containerEl).setName("Linux").setDesc("Terminal launchers only.").setHeading();
 		new Setting(containerEl)
 			.setName("Terminal")
 			.addDropdown((dropdown) =>
@@ -612,7 +638,7 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					})
 			);
 
-		new Setting(containerEl).setName("Custom launch template").setHeading();
+		new Setting(containerEl).setName("Custom launch template").setDesc("Terminal launchers only.").setHeading();
 		new Setting(containerEl)
 			.setName("Override everything above")
 			.setDesc("Optional. If set, it replaces all the platform auto-detection for Terminal launchers. Placeholders: {cwd} and {cmd}. Example for kitty: kitty --directory {cwd} {cmd}")
@@ -625,6 +651,13 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		const footer = containerEl.createDiv({ cls: "open-anything-footer" });
+		footer.createSpan({ text: "Open Anything, by waldemar-one. " });
+		footer.createEl("a", {
+			text: "View on GitHub",
+			href: "https://github.com/waldemar-one/open-anything-obsidian",
+		});
 	}
 
 	private renderLauncherRow(containerEl: HTMLElement, launcher: Launcher): void {
@@ -645,31 +678,39 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 
 		row.addDropdown((dropdown) =>
 			dropdown
-				.addOptions({ terminal: "terminal", app: "app", url: "website" })
+				.addOptions({ terminal: "terminal", app: "app", url: "website", script: "script", sequence: "sequence" })
 				.setValue(launcher.type)
 				.onChange(async (value) => {
 					launcher.type = value as LauncherType;
+					if (value === "script" && !launcher.scriptRuntime) launcher.scriptRuntime = "js";
+					if (value === "sequence" && !launcher.sequenceSteps) launcher.sequenceSteps = [];
 					await this.plugin.saveSettings();
-						this.build();
+					this.build();
 				})
 		);
 
-		row.addText((text) => {
-			const placeholder =
-				launcher.type === "url"
-					? "https://example.com"
-					: launcher.type === "app"
-						? "app name or path"
-						: "shell command";
-			text
-				.setPlaceholder(placeholder)
-				.setValue(launcher.target)
-				.onChange(async (value) => {
-					launcher.target = value;
-					await this.plugin.saveSettings();
-				});
-			text.inputEl.classList.add("open-anything-target-input");
-		});
+		// "sequence" launchers don't have a single target (their targets are the steps
+		// below), so the shared target field only shows up for the other four types.
+		if (launcher.type !== "sequence") {
+			row.addText((text) => {
+				const placeholder =
+					launcher.type === "url"
+						? "https://example.com"
+						: launcher.type === "app"
+							? "app name or path"
+							: launcher.type === "script"
+								? "path/to/script.js, relative to vault root"
+								: "shell command";
+				text
+					.setPlaceholder(placeholder)
+					.setValue(launcher.target)
+					.onChange(async (value) => {
+						launcher.target = value;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.classList.add("open-anything-target-input");
+			});
+		}
 
 		row.addButton((button: ButtonComponent) => {
 			button
@@ -694,6 +735,119 @@ class OpenAnythingSettingTab extends PluginSettingTab {
 					this.build();
 				})
 		);
+
+		if (launcher.type === "script") this.renderScriptDetails(containerEl, launcher);
+		if (launcher.type === "sequence") this.renderSequenceDetails(containerEl, launcher);
+	}
+
+	/** Extra fields for "script" launchers: which runtime, plus optional arguments. Sits directly under the summary row. */
+	private renderScriptDetails(containerEl: HTMLElement, launcher: Launcher): void {
+		const details = containerEl.createDiv({ cls: "open-anything-launcher-details" });
+
+		new Setting(details)
+			.setName("Runtime")
+			.setDesc('"js" runs in Obsidian\'s own process; "py" is spawned as a separate Python process and can\'t access the vault directly.')
+			.addDropdown((dropdown) =>
+				dropdown
+					.addOptions({ js: "JavaScript (.js)", py: "Python (.py)" })
+					.setValue(launcher.scriptRuntime ?? "js")
+					.onChange(async (value) => {
+						launcher.scriptRuntime = value as ScriptRuntime;
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(details)
+			.setName("Arguments")
+			.setDesc("Optional, space-separated. Passed to the script as-is; quoting isn't supported yet.")
+			.addText((text) =>
+				text
+					.setPlaceholder("--flag value")
+					.setValue(launcher.scriptArgs ?? "")
+					.onChange(async (value) => {
+						launcher.scriptArgs = value;
+						await this.plugin.saveSettings();
+					})
+			);
+	}
+
+	/** Extra fields for "sequence" launchers: the ordered list of steps, add-step picker, and stop-on-error toggle. */
+	private renderSequenceDetails(containerEl: HTMLElement, launcher: Launcher): void {
+		const details = containerEl.createDiv({ cls: "open-anything-launcher-details" });
+		const steps = launcher.sequenceSteps ?? (launcher.sequenceSteps = []);
+
+		new Setting(details).setName("Steps").setDesc("Runs top to bottom. A sequence can't contain another sequence.").setHeading();
+
+		if (steps.length === 0) {
+			details.createEl("p", { text: "No steps yet, add one below.", cls: "setting-item-description" });
+		}
+
+		steps.forEach((stepId, index) => {
+			const step = this.plugin.settings.launchers.find((l) => l.id === stepId);
+			const stepRow = new Setting(details).setName(step ? step.name : "(deleted launcher)");
+			stepRow.settingEl.classList.add("open-anything-sequence-step");
+
+			stepRow.addButton((button: ButtonComponent) =>
+				button
+					.setIcon("arrow-up")
+					.setTooltip("Move up")
+					.setDisabled(index === 0)
+					.onClick(async () => {
+						[steps[index - 1], steps[index]] = [steps[index], steps[index - 1]];
+						await this.plugin.saveSettings();
+						this.build();
+					})
+			);
+			stepRow.addButton((button: ButtonComponent) =>
+				button
+					.setIcon("arrow-down")
+					.setTooltip("Move down")
+					.setDisabled(index === steps.length - 1)
+					.onClick(async () => {
+						[steps[index], steps[index + 1]] = [steps[index + 1], steps[index]];
+						await this.plugin.saveSettings();
+						this.build();
+					})
+			);
+			stepRow.addButton((button: ButtonComponent) =>
+				button
+					.setIcon("x")
+					.setTooltip("Remove from sequence")
+					.onClick(async () => {
+						steps.splice(index, 1);
+						await this.plugin.saveSettings();
+						this.build();
+					})
+			);
+		});
+
+		// Only non-sequence launchers not already in this sequence can be added, which rules
+		// out both self-reference and nested sequences at the point of selection.
+		const available = this.plugin.settings.launchers.filter(
+			(l) => l.type !== "sequence" && l.id !== launcher.id && !steps.includes(l.id)
+		);
+		if (available.length > 0) {
+			new Setting(details).setName("Add step").addDropdown((dropdown) => {
+				dropdown.addOption("", "Choose a launcher...");
+				for (const candidate of available) dropdown.addOption(candidate.id, candidate.name || "Untitled");
+				dropdown.setValue("").onChange(async (value) => {
+					if (!value) return;
+					steps.push(value);
+					await this.plugin.saveSettings();
+					this.build();
+				});
+			});
+		}
+
+		new Setting(details)
+			.setName("Stop on error")
+			.setDesc("If a step fails, stop the sequence instead of continuing to the next one.")
+			.addToggle((toggle) =>
+				toggle.setValue(launcher.sequenceStopOnError ?? true).onChange(async (value) => {
+					launcher.sequenceStopOnError = value;
+					await this.plugin.saveSettings();
+				})
+			);
 	}
 }
 

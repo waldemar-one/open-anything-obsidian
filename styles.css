@@ -19,3 +19,21 @@
 	width: 1.2em;
 	height: 1.2em;
 }
+
+.open-anything-launcher-details {
+	margin: 0 0 1em 2em;
+	padding: 0.5em 1em;
+	border-left: 2px solid var(--background-modifier-border);
+}
+
+.open-anything-sequence-step {
+	padding-block: 0.25em;
+}
+
+.open-anything-footer {
+	margin-top: 2em;
+	padding-top: 1em;
+	border-top: 1px solid var(--background-modifier-border);
+	color: var(--text-muted);
+	font-size: var(--font-ui-smaller);
+}
