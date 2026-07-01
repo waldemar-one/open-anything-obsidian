@@ -20,23 +20,43 @@ function nodeRequire<T>(id: string): T {
 	return require(id) as T;
 }
 
-type LauncherType = "terminal" | "app" | "url";
+type LauncherType = "terminal" | "app" | "url" | "script" | "sequence";
 type WorkingDirMode = "vault" | "active-file";
 type WinTerminal = "wt" | "cmd" | "powershell";
 type LinuxTerminal = "gnome-terminal" | "konsole" | "x-terminal-emulator";
+/** "js" scripts run in-process via nodeRequire, same trick as Terminal/App.
+ * "py" scripts are always spawned as a separate process (python3 <path> [args]) since
+ * a Python interpreter can't run inside the Electron/Node process — no shared app access. */
+type ScriptRuntime = "js" | "py";
 
 interface Launcher {
 	/** Stable id, generated once. Used to build the command id, so it must never change. */
 	id: string;
 	name: string;
 	type: LauncherType;
-	/** Shell command (terminal), binary name or path (app), or URL (url). */
+	/** Shell command (terminal), binary name or path (app), URL (url), or vault-relative script path (script). Unused for sequence. */
 	target: string;
+	/**
+	 * Obsidian icon id (see getIconIds()) shown as a ribbon button on the left sidebar.
+	 * Empty means no ribbon icon for this launcher, which is the default for all of them.
+	 */
+	icon: string;
+	/** Only used when type === "script". Ignored otherwise. */
+	scriptRuntime?: ScriptRuntime;
+	/** Space-separated extra arguments passed to the script. Only used when type === "script". */
+	scriptArgs?: string;
+	/**
+	 * Only used when type === "sequence". IDs of other launchers to run in order.
+	 * A launcher can't reference itself or another sequence, to avoid infinite loops.
+	 */
+	sequenceSteps?: string[];
+	/** Only used when type === "sequence". If true, stop at the first step that fails; if false, run all steps regardless. */
+	sequenceStopOnError?: boolean;
 }
 
 interface OpenAnythingSettings {
 	launchers: Launcher[];
-	/** Applies to "terminal" and "app" launchers. Irrelevant for "url". */
+	/** Applies to "terminal", "app", and "script" launchers. Irrelevant for "url" and "sequence". */
 	workingDirMode: WorkingDirMode;
 	macTerminalApp: string;
 	winTerminalApp: WinTerminal;
@@ -47,6 +67,8 @@ interface OpenAnythingSettings {
 	 * Example for kitty: kitty --directory {cwd} {cmd}
 	 */
 	customLaunchTemplate: string;
+	/** Command used to run "py" script launchers. Defaults to python3, but some setups only have python or py on PATH. */
+	pythonCommand: string;
 }
 
 const DEFAULT_SETTINGS: OpenAnythingSettings = {
@@ -56,6 +78,7 @@ const DEFAULT_SETTINGS: OpenAnythingSettings = {
 			name: "Claude Code",
 			type: "terminal",
 			target: "claude",
+			icon: "",
 		},
 	],
 	workingDirMode: "vault",
@@ -63,16 +86,20 @@ const DEFAULT_SETTINGS: OpenAnythingSettings = {
 	winTerminalApp: "wt",
 	linuxTerminal: "gnome-terminal",
 	customLaunchTemplate: "",
+	pythonCommand: "python3",
 };
 
 export default class OpenAnythingPlugin extends Plugin {
 	settings: OpenAnythingSettings;
+	/** Tracks currently-mounted ribbon icon elements per launcher id, so changing or clearing a launcher's icon can remove the stale one instead of stacking duplicates. */
+	private ribbonIcons = new Map<string, HTMLElement>();
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
 		for (const launcher of this.settings.launchers) {
 			this.registerLauncherCommand(launcher);
+			this.registerLauncherRibbonIcon(launcher);
 		}
 
 		this.addSettingTab(new OpenAnythingSettingTab(this.app, this));
@@ -81,11 +108,21 @@ export default class OpenAnythingPlugin extends Plugin {
 	// ---------- Launcher CRUD ----------
 
 	async addLauncher(type: LauncherType): Promise<Launcher> {
+		const names: Record<LauncherType, string> = {
+			url: "New website",
+			app: "New app",
+			terminal: "New terminal command",
+			script: "New script",
+			sequence: "New sequence",
+		};
 		const launcher: Launcher = {
 			id: `launcher-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-			name: type === "url" ? "New website" : type === "app" ? "New app" : "New terminal command",
+			name: names[type],
 			type,
 			target: "",
+			icon: "",
+			...(type === "script" ? { scriptRuntime: "js", scriptArgs: "" } : {}),
+			...(type === "sequence" ? { sequenceSteps: [], sequenceStopOnError: true } : {}),
 		};
 		this.settings.launchers.push(launcher);
 		await this.saveSettings();
@@ -106,18 +143,42 @@ export default class OpenAnythingPlugin extends Plugin {
 		this.addCommand({
 			id: `run-${launcher.id}`,
 			name: `Open: ${launcher.name || "Untitled"}`,
-			callback: () => this.runLauncher(launcher.id),
+			callback: () => void this.runLauncher(launcher.id),
 		});
+	}
+
+	/** Mounts (or re-mounts, if the icon changed) a ribbon button for this launcher. Removes it entirely if the icon field is empty. */
+	registerLauncherRibbonIcon(launcher: Launcher): void {
+		const existing = this.ribbonIcons.get(launcher.id);
+		if (existing) {
+			existing.remove();
+			this.ribbonIcons.delete(launcher.id);
+		}
+		if (!launcher.icon.trim()) return;
+
+		const el = this.addRibbonIcon(launcher.icon, launcher.name || "Untitled", () => void this.runLauncher(launcher.id));
+		this.ribbonIcons.set(launcher.id, el);
 	}
 
 	// ---------- Running ----------
 
-	runLauncher(id: string): void {
+	/**
+	 * visitedSequences guards against sequence cycles at runtime (the settings UI already
+	 * prevents a sequence from listing another sequence as a step, but this is the last line
+	 * of defense in case settings.json was hand-edited).
+	 */
+	async runLauncher(id: string, visitedSequences: Set<string> = new Set()): Promise<void> {
 		const launcher = this.settings.launchers.find((l) => l.id === id);
 		if (!launcher) {
 			new Notice("This launcher no longer exists.");
 			return;
 		}
+
+		if (launcher.type === "sequence") {
+			await this.runSequence(launcher, visitedSequences);
+			return;
+		}
+
 		if (!launcher.target.trim()) {
 			new Notice(`"${launcher.name}" has no target set yet. Fill it in under settings.`);
 			return;
@@ -129,7 +190,7 @@ export default class OpenAnythingPlugin extends Plugin {
 				return;
 			}
 
-			// "terminal" and "app" both need a real OS process.
+			// Every remaining type needs a real OS process (or, for "script"/"js", at least Node access).
 			if (!Platform.isDesktopApp) {
 				new Notice(`"${launcher.name}" only works on desktop.`);
 				return;
@@ -143,13 +204,50 @@ export default class OpenAnythingPlugin extends Plugin {
 
 			if (launcher.type === "terminal") {
 				this.launchTerminal(cwd, launcher.target);
-			} else {
+				new Notice(`Opening: ${launcher.name}`);
+			} else if (launcher.type === "app") {
 				this.launchApp(cwd, launcher.target);
+				new Notice(`Opening: ${launcher.name}`);
+			} else {
+				// launchScript reports its own success/failure, since (unlike terminal/app,
+				// which are fire-and-forget spawns) it's actually awaited to completion.
+				await this.launchScript(cwd, launcher);
 			}
-			new Notice(`Opening: ${launcher.name}`);
 		} catch (err) {
 			console.error("Open Anything:", err);
 			new Notice("Something went wrong, check the developer console (Ctrl+Shift+I).");
+		}
+	}
+
+	private async runSequence(launcher: Launcher, visitedSequences: Set<string>): Promise<void> {
+		if (visitedSequences.has(launcher.id)) {
+			new Notice(`"${launcher.name}" is part of a sequence cycle, refusing to run it.`);
+			return;
+		}
+		const steps = launcher.sequenceSteps ?? [];
+		if (steps.length === 0) {
+			new Notice(`"${launcher.name}" has no steps yet. Add some under settings.`);
+			return;
+		}
+
+		visitedSequences.add(launcher.id);
+		new Notice(`Running sequence: ${launcher.name}`);
+
+		for (const stepId of steps) {
+			const step = this.settings.launchers.find((l) => l.id === stepId);
+			if (!step) {
+				new Notice(`Sequence "${launcher.name}": a step was deleted, skipping it.`);
+				continue;
+			}
+			try {
+				await this.runLauncher(stepId, visitedSequences);
+			} catch (err) {
+				console.error("Open Anything: sequence step failed", err);
+				if (launcher.sequenceStopOnError ?? true) {
+					new Notice(`Sequence "${launcher.name}" stopped: "${step.name}" failed.`);
+					return;
+				}
+			}
 		}
 	}
 
@@ -168,6 +266,14 @@ export default class OpenAnythingPlugin extends Plugin {
 			}
 		}
 		return vaultPath;
+	}
+
+	/** Resolves a vault-relative path (as typed into a Script launcher's target field) to an absolute filesystem path. Returns null if the vault isn't on local disk. */
+	private resolveVaultPath(relativePath: string): string | null {
+		const adapter = this.app.vault.adapter;
+		if (!(adapter instanceof FileSystemAdapter)) return null;
+		const path = nodeRequire<typeof import("path")>("path");
+		return path.join(adapter.getBasePath(), relativePath);
 	}
 
 	private notifySpawnError(err: NodeJS.ErrnoException): void {
@@ -204,6 +310,58 @@ export default class OpenAnythingPlugin extends Plugin {
 		const child = spawn(target, [], { cwd, detached: true, stdio: "ignore", windowsHide: false });
 		child.on("error", (err) => this.notifySpawnError(err));
 		child.unref();
+	}
+
+	// ---------- Type: script (desktop only; "js" runs in-process, "py" is spawned) ----------
+
+	private async launchScript(cwd: string, launcher: Launcher): Promise<void> {
+		const runtime = launcher.scriptRuntime ?? "js";
+		const absolutePath = this.resolveVaultPath(launcher.target);
+		if (!absolutePath) {
+			new Notice("Couldn't resolve the script's path.");
+			return;
+		}
+		const args = (launcher.scriptArgs ?? "").trim().length > 0 ? launcher.scriptArgs!.trim().split(/\s+/) : [];
+
+		if (runtime === "py") {
+			const { spawn } = nodeRequire<typeof import("child_process")>("child_process");
+			const child = spawn(this.settings.pythonCommand.trim() || "python3", [absolutePath, ...args], {
+				cwd,
+				detached: true,
+				stdio: "ignore",
+				windowsHide: false,
+			});
+			child.on("error", (err) => this.notifySpawnError(err));
+			child.unref();
+			new Notice(`Opening: ${launcher.name}`);
+			return;
+		}
+
+		// "js": runs inside Obsidian's own process via a fresh require(), the same lazy-loading
+		// trick nodeRequire() uses for Node built-ins. A per-call createRequire() clears the
+		// module cache first, so edits to the script are picked up on the next run instead of
+		// being cached forever after the first call.
+		//
+		// The scripting API is intentionally minimal for now (just `app` and `args`) — a richer,
+		// QuickAdd-style API (prompts, suggesters, declarative per-script settings) is planned
+		// separately rather than bolted on here.
+		try {
+			const { createRequire } = nodeRequire<typeof import("module")>("module");
+			const scriptRequire = createRequire(absolutePath);
+			delete scriptRequire.cache[absolutePath];
+			const mod: unknown = scriptRequire(absolutePath);
+			const exported = (mod as { default?: unknown }).default ?? mod;
+			if (typeof exported !== "function") {
+				new Notice(`"${launcher.name}": the script must export a function (module.exports = ... or export default ...).`);
+				return;
+			}
+			await (exported as (ctx: { app: App; args: string[] }) => unknown)({ app: this.app, args });
+			new Notice(`Ran: ${launcher.name}`);
+		} catch (err) {
+			console.error(`Open Anything: script "${launcher.name}" threw`, err);
+			const message = err instanceof Error ? err.message : String(err);
+			new Notice(`"${launcher.name}" script error: ${message}`);
+		}
 	}
 
 	// ---------- Type: terminal (desktop only, runs a command in an interactive terminal) ----------
